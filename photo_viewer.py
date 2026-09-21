@@ -7,22 +7,161 @@ import sys
 import subprocess
 if sys.platform == 'win32':
     import winsound
-    import win32clipboard
 import json
 import io
+import platform
+import queue
 import threading
+import time
 import rawpy
 import urllib.request
 import urllib.error
 import tempfile
 import webbrowser
 
-CURRENT_VERSION = "3.5"
+CURRENT_VERSION = "3.6.0"
+APPLICATION_TITLE = f"🐦 Water-redstart: the chirping viewer v{CURRENT_VERSION}"
+
+# 预读必须与 Tk 完全隔离。Tkinter/Tcl 只允许 UI 主线程访问；后台线程收到的
+# 请求均是路径、整数和线程安全的 Python 容器。
+PRELOAD_BEHIND_COUNT = 2
+PRELOAD_NORMAL_COUNT = 12
+PRELOAD_LOW_MEMORY_COUNT = 4
+PRELOAD_SUPER_STARTUP_COUNT = 24
+PRELOAD_SUPER_COUNT = 16
+NAVIGATION_THROTTLE_MS = 120
+CONFIG_SAVE_DELAY_MS = 500
+SELECT_COUNT_CACHE_SECONDS = 2.0
+
+
+def _select_release_asset(assets, platform_name=None, machine_name=None):
+    """从 GitHub Release assets 中选择当前平台和架构的安装包。"""
+    platform_name = platform_name or sys.platform
+    machine_name = (machine_name or platform.machine()).lower()
+
+    if platform_name == "win32":
+        candidates = [asset for asset in assets if asset.get("name", "").lower().endswith(".exe")]
+        preferred = [
+            asset for asset in candidates
+            if "windows" in asset.get("name", "").lower() or "win" in asset.get("name", "").lower()
+        ]
+        return (preferred or candidates or [None])[0]
+
+    if platform_name == "darwin":
+        is_arm64 = machine_name in ("arm64", "aarch64")
+        mac_assets = []
+        for asset in assets:
+            name = asset.get("name", "").lower()
+            if not name.endswith((".zip", ".dmg")):
+                continue
+            if not any(token in name for token in ("macos", "darwin", "mac_")):
+                continue
+            if is_arm64 and any(token in name for token in ("x64", "x86_64", "intel")):
+                continue
+            if not is_arm64 and any(token in name for token in ("arm64", "aarch64", "apple_silicon")):
+                continue
+            mac_assets.append(asset)
+
+        arch_tokens = ("arm64", "aarch64", "apple_silicon") if is_arm64 else ("x64", "x86_64", "intel")
+        preferred = [
+            asset for asset in mac_assets
+            if any(token in asset.get("name", "").lower() for token in arch_tokens)
+        ]
+        return (preferred or mac_assets or [None])[0]
+
+    return None
+
+
+def _decode_image_fast(img_path, size_val):
+    """读取并缩放图片；本函数不创建、读取或销毁任何 Tk 对象。"""
+    ext = os.path.splitext(img_path)[1].lower()
+    size_val = max(1, int(size_val))
+    target_size = (size_val, size_val)
+    try:
+        if ext in ('.arw', '.sr2', '.srf', '.crw', '.cr2', '.cr3', '.nef', '.nrw', '.dng', '.orf', '.rw2', '.raf', '.pef'):
+            # 对于RAW照片，使用rawpy提取内嵌的预览图（通常是jpeg格式）
+            with rawpy.imread(img_path) as raw:
+                try:
+                    thumb = raw.extract_thumb()
+                except rawpy.LibRawNoThumbnailError:
+                    rgb = raw.postprocess(half_size=True, use_camera_wb=True)
+                    img = Image.fromarray(rgb)
+                    img.thumbnail(target_size, Image.Resampling.LANCZOS)
+                    return ImageOps.exif_transpose(img)
+
+            if thumb.format in (rawpy.ThumbFormat.JPEG, rawpy.ThumbFormat.BITMAP):
+                img = Image.open(io.BytesIO(thumb.data))
+                img.draft("RGB", target_size)
+                img = ImageOps.exif_transpose(img)
+                img.thumbnail(target_size, Image.Resampling.LANCZOS)
+                return img
+
+        img = Image.open(img_path)
+        img.draft("RGB", target_size)
+        img = ImageOps.exif_transpose(img)
+        img.thumbnail(target_size, Image.Resampling.LANCZOS)
+        return img
+    except Exception as e:
+        print(f"解析图片加速失败 {img_path}: {e}")
+        return None
+
+
+def _build_preload_indices(current_idx, image_count, preload_count):
+    """返回当前页附近的有序预读索引，优先保留少量后向缓存。"""
+    indices = []
+    for offset in range(1, PRELOAD_BEHIND_COUNT + 1):
+        idx = current_idx - offset
+        if idx >= 0:
+            indices.append(idx)
+    for offset in range(1, preload_count + 1):
+        idx = current_idx + offset
+        if idx < image_count:
+            indices.append(idx)
+    return tuple(indices)
+
+
+def _execute_preload_request(request):
+    """执行一份不可变预读快照；只接触普通 Python 数据和 PIL/rawpy。"""
+    cancel_event = request["cancel_event"]
+    cache = request["cache"]
+    cache_lock = request["cache_lock"]
+    image_names = request["image_names"]
+    current_dir = request["current_dir"]
+    image_quality = request["image_quality"]
+
+    for idx in request["indices"]:
+        if cancel_event.is_set():
+            return
+
+        with cache_lock:
+            if idx in cache:
+                continue
+
+        img_path = os.path.join(current_dir, image_names[idx])
+        img_obj = _decode_image_fast(img_path, image_quality)
+        if cancel_event.is_set():
+            return
+        if img_obj is not None:
+            with cache_lock:
+                cache[idx] = img_obj
+
+
+def _preload_worker_loop(request_queue):
+    """单一守护 worker：串行处理预读，避免高速翻页产生解码线程风暴。"""
+    while True:
+        request = request_queue.get()
+        if request is None:
+            return
+        try:
+            _execute_preload_request(request)
+        except Exception as e:
+            # 单张或单次请求失败不能终止后续预读。
+            print(f"后台预读失败: {e}")
 
 class ImageViewer:
     def __init__(self, root):
         self.root = root
-        self.root.title("🐦 Water-redstart: the chirping viewer v3.5 (双平台)")
+        self.root.title(f"{APPLICATION_TITLE} (双平台)")
         # 初始窗口大小（加宽以容纳顶栏完整快捷键指引）
         self.root.geometry("1050x750")
 
@@ -48,13 +187,31 @@ class ImageViewer:
         self.select_folder_name = "SELECT"
         self.history = []  # 记录操作历史用于撤销
         
-        # 图片预加载缓存
+        # 图片预加载缓存。后台只有一个守护 worker，请求队列只保留最新位置。
         self.image_cache = {}
-        self.preload_thread = None
+        self._image_cache_lock = threading.Lock()
+        self._preload_requests = queue.Queue(maxsize=1)
+        self._preload_cancel_event = None
+        self.preload_thread = threading.Thread(
+            target=_preload_worker_loop,
+            args=(self._preload_requests,),
+            daemon=True,
+            name="birdviewer-preload",
+        )
+        self.preload_thread.start()
+
+        self._navigation_job = None
+        self._pending_navigation_delta = 0
+        self._last_navigation_render_at = 0.0
+        self._config_save_job = None
+        self._select_count_cache = None
+        self._select_count_cache_path = None
+        self._select_count_cache_at = 0.0
         
         # 尝试读取上一次的进度配置
         self.config_file = os.path.join(self.current_dir, ".birdviewer_config.json")
         self.image_quality = tk.IntVar(value=8000)
+        self.super_mode = tk.BooleanVar(value=False)  # Super 连拍模式
         self.ignored_version = None  # 用户忽略的更新版本
         self.load_config()
         
@@ -77,6 +234,14 @@ class ImageViewer:
         self.canvas.pack(fill=tk.BOTH, expand=True)
         
         self.canvas.bind("<MouseWheel>", self.on_mouse_wheel)
+        # Tk 9 在 macOS/Windows 上会为触控板和 Magic Mouse 发送高精度滚动事件。
+        try:
+            self.canvas.bind("<TouchpadScroll>", self.on_touchpad_scroll)
+        except tk.TclError:
+            # Tk 8.6 不支持该事件，继续使用 MouseWheel。
+            pass
+        self.canvas.bind("<Button-4>", self.on_mouse_wheel_up)
+        self.canvas.bind("<Button-5>", self.on_mouse_wheel_down)
         self.canvas.bind("<ButtonPress-1>", self.on_button_press)
         self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
 
@@ -90,7 +255,6 @@ class ImageViewer:
         self.reverse_mode = False
         self.is_magnifying = False
         self.magnify_m = 3.8
-        self.super_mode = tk.BooleanVar(value=False)  # Super 连拍模式
 
         # 热键配置
         self.hotkey_next = 'd'
@@ -117,6 +281,7 @@ class ImageViewer:
 
         self.create_menu()
         self.apply_bindings()
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
 
         # 绑定固定快捷键
         self.root.bind("<F11>", self.toggle_fullscreen)
@@ -194,11 +359,17 @@ class ImageViewer:
             self.root.after(20, lambda: self._process_open_folder(folder_selected))
 
     def _process_open_folder(self, folder_selected):
+        self._cancel_pending_navigation()
+        self.save_config()
+        self._cancel_preload(clear_cache=True)
+
         # 清理当前资源
         self.current_img_obj = None
         self.tk_image = None
         self.images = []
-        self.image_cache = {}
+        self._select_count_cache = None
+        self._select_count_cache_path = None
+        self._select_count_cache_at = 0.0
         if self.canvas and hasattr(self, 'image_on_canvas') and self.image_on_canvas:
             self.canvas.delete(self.image_on_canvas)
             
@@ -246,7 +417,7 @@ class ImageViewer:
                 messagebox.showwarning("哎呀", "孵化失败，小鸟去哪了？文件夹里似乎没有照片呢！")
                 self.show_empty_state()
                 self.top_info_label.config(text="🐾 欢迎！请挑选一个装满照片的文件夹开始吧~")
-                self.root.title("🐦 Water-redstart: the chirping viewer v3.5")
+                self.root.title(APPLICATION_TITLE)
 
     def show_subfolder_dialog(self, parent_folder, subdirs):
         dialog = tk.Toplevel(self.root)
@@ -285,7 +456,7 @@ class ImageViewer:
             dialog.destroy()
             self.show_empty_state()
             self.top_info_label.config(text="🐾 欢迎！请挑选一个装满照片的文件夹开始吧~")
-            self.root.title("🐦 Water-redstart: the chirping viewer v3.5")
+            self.root.title(APPLICATION_TITLE)
 
         # 双击列表项直接打开
         listbox.bind("<Double-1>", lambda e: on_open())
@@ -303,7 +474,7 @@ class ImageViewer:
         file_menu = tk.Menu(self.menubar, tearoff=0)
         file_menu.add_command(label="打开照片文件夹...", command=self.open_folder)
         file_menu.add_separator()
-        file_menu.add_command(label="退出", command=self.root.quit)
+        file_menu.add_command(label="退出", command=self.close)
         self.menubar.add_cascade(label="文件", menu=file_menu)
         
         # 设置菜单
@@ -313,8 +484,8 @@ class ImageViewer:
         settings_menu.add_checkbutton(label="倒序选片 (从后往前)", variable=self.reverse_var, command=self.toggle_reverse)
         
         self.low_memory_mode = tk.BooleanVar(value=False)
-        settings_menu.add_checkbutton(label="省内存模式 (预加载20张)", variable=self.low_memory_mode)
-        settings_menu.add_checkbutton(label="🚀 Super 连拍模式 (启动100张/翻页85张)", variable=self.super_mode)
+        settings_menu.add_checkbutton(label="省内存模式 (预加载4张)", variable=self.low_memory_mode)
+        settings_menu.add_checkbutton(label="🚀 Super 连拍模式 (启动24张/翻页16张)", variable=self.super_mode)
         
         quality_menu = tk.Menu(settings_menu, tearoff=0)
         quality_menu.add_radiobutton(label="2K (运行快，省内存)", variable=self.image_quality, value=2000, command=self.change_quality)
@@ -344,7 +515,7 @@ class ImageViewer:
         help_menu.add_separator()
         help_menu.add_command(label="🕊️ 检查更新...", command=lambda: threading.Thread(target=self.check_for_updates, daemon=True).start())
         help_menu.add_command(label="关于", command=lambda: messagebox.showinfo(
-            "关于", "🐦 Water-redstart: the chirping viewer\n\n版本：3.4 (双平台)\n作者：Crowpaw@2026\n鸣谢：ARC, Untribiium, ~ris, 蓝嘴红鹊, 欧鹭风云, 瑞瑞的, 白鹡鸰, 灰喜鹊, 碳酸, 逢青, Gemini 3.1 Pro, GPT-5.5, DeepSeek-V4-Pro, YIP\n于一"
+            "关于", f"🐦 Water-redstart: the chirping viewer\n\n版本：{CURRENT_VERSION} (双平台)\n作者：Crowpaw@2026\n鸣谢：ARC, Untribiium, ~ris, 蓝嘴红鹊, 欧鹭风云, 瑞瑞的, 白鹡鸰, 灰喜鹊, 碳酸, 逢青, Gemini 3.1 Pro, GPT-5.5, DeepSeek-V4-Pro, YIP\n于一"
         ))
         self.menubar.add_cascade(label="帮助", menu=help_menu)
         
@@ -404,6 +575,8 @@ class ImageViewer:
         self.update_title()
 
     def toggle_reverse(self):
+        self._cancel_pending_navigation()
+        self._cancel_preload(clear_cache=True)
         self.reverse_mode = self.reverse_var.get()
         self.images.reverse()
         self.index = len(self.images) - 1 - self.index
@@ -413,24 +586,41 @@ class ImageViewer:
         self.load_image()
 
     def change_quality(self):
-        self.image_cache.clear()
+        self._cancel_pending_navigation()
+        self._cancel_preload(clear_cache=True)
         self.save_config()
         self.load_image()
 
     def get_select_count(self):
         select_folder_path = self.select_folder_name if os.path.isabs(self.select_folder_name) else os.path.join(self.current_dir, self.select_folder_name)
-        if not os.path.exists(select_folder_path):
-            return 0
-        try:
-            return sum(1 for f in os.listdir(select_folder_path) 
-                       if os.path.isfile(os.path.join(select_folder_path, f)) and f.lower().endswith(self.supported_formats))
-        except:
-            return 0
+        now = time.monotonic()
+        if (
+            self._select_count_cache_path == select_folder_path
+            and self._select_count_cache is not None
+            and now - self._select_count_cache_at < SELECT_COUNT_CACHE_SECONDS
+        ):
+            return self._select_count_cache
+
+        count = 0
+        if os.path.exists(select_folder_path):
+            try:
+                count = sum(
+                    1 for f in os.listdir(select_folder_path)
+                    if os.path.isfile(os.path.join(select_folder_path, f))
+                    and f.lower().endswith(self.supported_formats)
+                )
+            except OSError:
+                count = 0
+
+        self._select_count_cache = count
+        self._select_count_cache_path = select_folder_path
+        self._select_count_cache_at = now
+        return count
 
     def update_title(self):
         select_count = self.get_select_count()
         folder_name = os.path.basename(self.current_dir.rstrip('/\\')) if self.current_dir else '未选择目录'
-        base_title_prefix = f"🐦 Water-redstart: the chirping viewer v3.5 (双平台) - {folder_name}"
+        base_title_prefix = f"{APPLICATION_TITLE} (双平台) - {folder_name}"
         
         info_help = (f">> 跳: [{self.hotkey_next.upper()}/{self.hotkey_arrow_right.title()}]  "
                      f"* 挑: [{self.hotkey_copy.upper()}/{self.hotkey_arrow_up.title()}]  "
@@ -646,6 +836,13 @@ class ImageViewer:
                 pass
 
     def save_config(self):
+        if self._config_save_job is not None:
+            try:
+                self.root.after_cancel(self._config_save_job)
+            except (tk.TclError, ValueError):
+                pass
+            self._config_save_job = None
+
         try:
             import json
             global_path = self.get_global_config_path()
@@ -673,76 +870,52 @@ class ImageViewer:
             except Exception:
                 pass
 
-    def read_image_fast(self, img_path):
-        """支持RAW格式和普通图片的快速读取"""
-        ext = os.path.splitext(img_path)[1].lower()
-        size_val = getattr(self, 'image_quality', tk.IntVar(value=8000)).get()
-        target_size = (size_val, size_val)
+    def schedule_save_config(self):
+        """合并连续翻页产生的配置写入，停止操作后再落盘。"""
+        if self._config_save_job is not None:
+            try:
+                self.root.after_cancel(self._config_save_job)
+            except (tk.TclError, ValueError):
+                pass
+        self._config_save_job = self.root.after(CONFIG_SAVE_DELAY_MS, self._run_scheduled_config_save)
+
+    def _run_scheduled_config_save(self):
+        self._config_save_job = None
+        self.save_config()
+
+    @staticmethod
+    def read_image_fast(img_path, size_val=8000):
+        """支持 RAW 和普通图片；调用方必须在 UI 线程取得画质整数。"""
+        return _decode_image_fast(img_path, size_val)
+
+    def _cancel_preload(self, clear_cache=False):
+        """取消运行中及排队中的预读；正在解码的单张会在完成后丢弃。"""
+        if self._preload_cancel_event is not None:
+            self._preload_cancel_event.set()
+            self._preload_cancel_event = None
+
         try:
-            if ext in ('.arw', '.sr2', '.srf', '.crw', '.cr2', '.cr3', '.nef', '.nrw', '.dng', '.orf', '.rw2', '.raf', '.pef'):
-                # 对于RAW照片，使用rawpy提取内嵌的预览图（通常是jpeg格式），速度极快数百倍
-                with rawpy.imread(img_path) as raw:
-                    try:
-                        thumb = raw.extract_thumb()
-                    except rawpy.LibRawNoThumbnailError:
-                        # 没有缩略图则执行完整的后处理渲染，但对性能极不友好
-                        rgb = raw.postprocess(half_size=True, use_camera_wb=True)
-                        img = Image.fromarray(rgb)
-                        img.thumbnail(target_size, Image.Resampling.LANCZOS)
-                        return ImageOps.exif_transpose(img)
-                        
-                if thumb.format in (rawpy.ThumbFormat.JPEG, rawpy.ThumbFormat.BITMAP):
-                    img = Image.open(io.BytesIO(thumb.data))
-                    img.draft("RGB", target_size) # 极致加速：利用libjpeg在解码时就降采样
-                    img = ImageOps.exif_transpose(img)
-                    img.thumbnail(target_size, Image.Resampling.LANCZOS)
-                    return img
-            
-            # 普通照片读取
-            img = Image.open(img_path)
-            img.draft("RGB", target_size) # 极致加速普通巨型JPG解码
-            img = ImageOps.exif_transpose(img)
-            img.thumbnail(target_size, Image.Resampling.LANCZOS)
-            return img
-        except Exception as e:
-            print(f"解析图片加速失败 {img_path}: {e}")
-            return None
+            while True:
+                stale_request = self._preload_requests.get_nowait()
+                if stale_request is not None:
+                    stale_request["cancel_event"].set()
+        except queue.Empty:
+            pass
 
-    def preload_images_worker(self, current_idx):
-        """后台预加载后续图片，保证极端暴力的盲开连翻也毫无卡顿"""
-        to_cache_indices = []
-        for i in range(1, 6):
-            if current_idx - i >= 0:
-                to_cache_indices.append(current_idx - i)
-                
-        # Super 连拍模式：启动时100张，之后每张85张；省内存模式：20张；普通：50张
-        if self.super_mode.get():
-            # 判断是否首次加载（启动时 current_idx 接近 0 且缓存几乎为空）
-            is_startup = (current_idx <= 2 and len(self.image_cache) < 10)
-            preload_count = 100 if is_startup else 85
-        else:
-            preload_count = 20 if getattr(self, 'low_memory_mode', None) and self.low_memory_mode.get() else 50
-        for i in range(1, preload_count + 1):
-            if current_idx + i < len(self.images):
-                to_cache_indices.append(current_idx + i)
+        if clear_cache:
+            with self._image_cache_lock:
+                self.image_cache = {}
 
-        new_cache = {}
-        for idx in to_cache_indices:
-            if idx in self.image_cache:
-                new_cache[idx] = self.image_cache[idx]
-
-        self.image_cache = new_cache  # 此处切断对其他不要图片的引用让垃圾回收
-
-        for idx in to_cache_indices:
-            # 若频繁翻页，打断之前的长时加载循环
-            if abs(self.index - current_idx) > 2:
-                break
-                
-            if idx not in self.image_cache:
-                img_path = os.path.join(self.current_dir, self.images[idx])
-                img_obj = self.read_image_fast(img_path)
-                if img_obj:
-                    self.image_cache[idx] = img_obj
+    def close(self):
+        """在 UI 线程保存最终进度并停止后台预读。"""
+        self._cancel_pending_navigation()
+        self.save_config()
+        self._cancel_preload(clear_cache=True)
+        try:
+            self._preload_requests.put_nowait(None)
+        except queue.Full:
+            pass
+        self.root.destroy()
                         
     def show_end_dialog(self):
         if getattr(self, 'end_dialog_open', False):
@@ -801,7 +974,11 @@ class ImageViewer:
                 do_delete_self()
             self.end_dialog_open = False
             end_window.destroy()
-            self.root.destroy()
+            if choice == 4:
+                self.close()
+            else:
+                self._cancel_preload(clear_cache=True)
+                self.root.destroy()
 
         end_window.protocol("WM_DELETE_WINDOW", lambda: (setattr(self, 'end_dialog_open', False), end_window.destroy()))
 
@@ -826,23 +1003,64 @@ class ImageViewer:
     def on_progress_change(self, val):
         new_idx = int(val)
         if new_idx != self.index and 0 <= new_idx < len(self.images):
+            self._cancel_pending_navigation()
             self.index = int(new_idx)
             self.load_image()
 
     def start_preload(self):
-        # 抛入后台线程进行加载，不阻塞UI主线程
-        if self.preload_thread and self.preload_thread.is_alive():
-            return
-        # Super 模式启动时显示加载提示
-        if self.super_mode.get():
-            is_startup = (self.index <= 2 and len(self.image_cache) < 10)
+        """在 UI 线程冻结设置快照，然后把纯 Python 请求交给后台 worker。"""
+        current_idx = int(self.index)
+        image_names = tuple(self.images)
+        current_dir = str(self.current_dir)
+        image_quality = int(self.image_quality.get())
+        super_mode = bool(self.super_mode.get())
+        low_memory_mode = bool(
+            getattr(self, 'low_memory_mode', None) and self.low_memory_mode.get()
+        )
+
+        with self._image_cache_lock:
+            cached_count = len(self.image_cache)
+
+        is_startup = current_idx <= 2 and cached_count < 10
+        if super_mode:
+            preload_count = PRELOAD_SUPER_STARTUP_COUNT if is_startup else PRELOAD_SUPER_COUNT
             if is_startup:
                 old_text = self.top_info_label.cget("text")
-                self.top_info_label.config(text="🚀 Super 连拍模式启动中，小鸟正在预加载 100 张照片...")
+                self.top_info_label.config(
+                    text=f"🚀 Super 连拍模式启动中，小鸟正在预加载 {preload_count} 张照片..."
+                )
                 # 加载完成后恢复（约 2 秒后）
                 self.root.after(2500, lambda: self.top_info_label.config(text=old_text) if self.top_info_label.winfo_exists() else None)
-        self.preload_thread = threading.Thread(target=self.preload_images_worker, args=(self.index,), daemon=True)
-        self.preload_thread.start()
+        else:
+            preload_count = PRELOAD_LOW_MEMORY_COUNT if low_memory_mode else PRELOAD_NORMAL_COUNT
+
+        indices = _build_preload_indices(current_idx, len(image_names), preload_count)
+        keep_indices = set(indices)
+        keep_indices.add(current_idx)
+
+        self._cancel_preload()
+        cancel_event = threading.Event()
+        self._preload_cancel_event = cancel_event
+
+        with self._image_cache_lock:
+            cache = self.image_cache
+            for idx in tuple(cache):
+                if idx not in keep_indices:
+                    del cache[idx]
+
+        request = {
+            "current_dir": current_dir,
+            "image_names": image_names,
+            "indices": indices,
+            "image_quality": image_quality,
+            "cache": cache,
+            "cache_lock": self._image_cache_lock,
+            "cancel_event": cancel_event,
+        }
+        try:
+            self._preload_requests.put_nowait(request)
+        except queue.Full:
+            cancel_event.set()
 
     def show_empty_state(self):
         if hasattr(self, 'empty_frame') and self.empty_frame.winfo_exists():
@@ -956,12 +1174,9 @@ class ImageViewer:
         if not self.images:
             self.show_empty_state()
             self.top_info_label.config(text="🐾 欢迎！请挑选一个装满照片的文件夹开始吧~")
-            self.root.title("🐦 Water-redstart: the chirping viewer v3.5")
+            self.root.title(APPLICATION_TITLE)
             return
             
-        # 2. 确认有图片后，再保存当前合法的路径到配置文件中
-        self.save_config()
-        
         self.hide_empty_state()
 
         # 检查是否看到最后一张了
@@ -975,13 +1190,19 @@ class ImageViewer:
         
         try:
             # 优先从多线程缓存中拿，拿到直接显示
-            if self.index in self.image_cache:
-                self.current_img_obj = self.image_cache[self.index]
+            with self._image_cache_lock:
+                cached_img = self.image_cache.get(self.index)
+            if cached_img is not None:
+                self.current_img_obj = cached_img
             else:
-                raw_img = self.read_image_fast(img_path)
+                # Tk 变量只在 UI 线程读取，并把普通整数传给解码函数。
+                image_quality = int(self.image_quality.get())
+                raw_img = self.read_image_fast(img_path, image_quality)
                 if not raw_img:
                     raise Exception("解析图片返回为空")
                 self.current_img_obj = raw_img
+                with self._image_cache_lock:
+                    self.image_cache[self.index] = raw_img
 
             self.is_fit = True
             self.update_title()
@@ -991,8 +1212,9 @@ class ImageViewer:
             
             self.display_image()
             
-            # 本页渲染完毕后，触发下两张图片的预感加载
+            # 本页渲染完毕后，触发邻近图片预读，并延迟保存本次进度。
             self.start_preload()
+            self.schedule_save_config()
             
         except Exception as e:
             print(f"无法打开图片 {img_path}: {e}")
@@ -1003,25 +1225,69 @@ class ImageViewer:
                 self.index = len(self.images) - 1
                 self.show_end_dialog()
 
-    def on_mouse_wheel(self, event):
-        if not getattr(self, 'current_img_obj', None): return
+    @staticmethod
+    def _decode_touchpad_delta(packed_delta):
+        """解析 Tk 9 打包的两个有符号 16 位滚动增量。"""
+        packed = int(packed_delta) & 0xFFFFFFFF
+        delta_x = (packed >> 16) & 0xFFFF
+        delta_y = packed & 0xFFFF
+        if delta_x >= 0x8000:
+            delta_x -= 0x10000
+        if delta_y >= 0x8000:
+            delta_y -= 0x10000
+        return delta_x, delta_y
+
+    def _zoom_at_cursor(self, x, y, steps):
+        if not getattr(self, 'current_img_obj', None) or steps == 0:
+            return "break"
+
         self.is_fit = False
-        scale_factor = 1.1 if event.delta > 0 else 0.9
-        
-        x = event.x
-        y = event.y
+        steps = max(-4.0, min(4.0, float(steps)))
+        scale_factor = 1.1 ** steps
+
         ww = self.canvas.winfo_width()
         wh = self.canvas.winfo_height()
-        
+
         cursor_im_x = self.im_x + (x - ww / 2) / self.current_scale
         cursor_im_y = self.im_y + (y - wh / 2) / self.current_scale
-        
+
         self.current_scale *= scale_factor
-        
+
         self.im_x = cursor_im_x - (x - ww / 2) / self.current_scale
         self.im_y = cursor_im_y - (y - wh / 2) / self.current_scale
-        
+
         self.display_image()
+        return "break"
+
+    def on_mouse_wheel(self, event):
+        delta = float(getattr(event, 'delta', 0))
+        if delta == 0:
+            return "break"
+
+        if sys.platform == 'win32':
+            steps = delta / 120.0
+        elif sys.platform == 'darwin':
+            steps = delta
+        else:
+            steps = delta / 120.0 if abs(delta) >= 120 else delta
+        return self._zoom_at_cursor(event.x, event.y, steps)
+
+    def on_touchpad_scroll(self, event):
+        try:
+            delta_x, delta_y = self.root.tk.call(
+                "tk::PreciseScrollDeltas", int(event.delta)
+            )
+        except (tk.TclError, TypeError, ValueError):
+            delta_x, delta_y = self._decode_touchpad_delta(event.delta)
+
+        del delta_x
+        return self._zoom_at_cursor(event.x, event.y, float(delta_y) / 10.0)
+
+    def on_mouse_wheel_up(self, event):
+        return self._zoom_at_cursor(event.x, event.y, 1.0)
+
+    def on_mouse_wheel_down(self, event):
+        return self._zoom_at_cursor(event.x, event.y, -1.0)
 
     def on_button_press(self, event):
         self.drag_start_x = event.x
@@ -1131,18 +1397,56 @@ class ImageViewer:
                 self.root.after_cancel(self._resize_job)
             self._resize_job = self.root.after(100, self.display_image)
 
-    def next_image(self, event=None):
-        if self.index < len(self.images):
-            self.history.append({'action': 'next', 'index': self.index})
-        self.index += 1
+    def _cancel_pending_navigation(self):
+        if self._navigation_job is not None:
+            try:
+                self.root.after_cancel(self._navigation_job)
+            except (tk.TclError, ValueError):
+                pass
+        self._navigation_job = None
+        self._pending_navigation_delta = 0
+
+    def _queue_navigation(self, delta):
+        """单次按键立即响应；连发时限频并合并中间位置。"""
+        if not self.images:
+            return "break"
+
+        target = self.index + self._pending_navigation_delta + delta
+        target = max(0, min(target, len(self.images)))
+        self._pending_navigation_delta = target - self.index
+
+        if self._navigation_job is None:
+            elapsed_ms = (time.monotonic() - self._last_navigation_render_at) * 1000
+            if self._last_navigation_render_at == 0.0 or elapsed_ms >= NAVIGATION_THROTTLE_MS:
+                self._apply_pending_navigation()
+            else:
+                delay_ms = max(1, int(NAVIGATION_THROTTLE_MS - elapsed_ms))
+                self._navigation_job = self.root.after(delay_ms, self._apply_pending_navigation)
+        return "break"
+
+    def _apply_pending_navigation(self):
+        delta = self._pending_navigation_delta
+        self._pending_navigation_delta = 0
+        self._navigation_job = None
+        if delta == 0:
+            return
+
+        target = self.index + delta
+        if delta > 0:
+            for idx in range(self.index, min(target, len(self.images))):
+                self.history.append({'action': 'next', 'index': idx})
+        self.index = target
         self.load_image()
+        self._last_navigation_render_at = time.monotonic()
+
+    def next_image(self, event=None):
+        return self._queue_navigation(1)
 
     def prev_image(self, event=None):
-        if self.index > 0:
-            self.index -= 1
-            self.load_image()
+        return self._queue_navigation(-1)
 
     def copy_and_next(self, event=None):
+        self._cancel_pending_navigation()
         if self.index < len(self.images):
             img_name = self.images[self.index]
             files_to_copy = self.image_groups.get(img_name, [img_name])
@@ -1186,6 +1490,7 @@ class ImageViewer:
         self.load_image()
 
     def copy_to_os_clipboard(self, event=None):
+        self._cancel_pending_navigation()
         if not self.images or self.index >= len(self.images):
             return
             
@@ -1226,6 +1531,7 @@ class ImageViewer:
 
     def show_image_properties(self, event=None):
         """显示当前图片的属性信息，支持多图时弹出选择框"""
+        self._cancel_pending_navigation()
         if not self.images or self.index >= len(self.images):
             return
         
@@ -1599,6 +1905,7 @@ class ImageViewer:
                 pass
 
     def undo_action(self, event=None):
+        self._cancel_pending_navigation()
         if not self.history:
             messagebox.showinfo("哎呀", "没有回忆可以撤销啦！")
             return
@@ -1653,14 +1960,13 @@ class ImageViewer:
     def check_for_updates(self, silent=False):
         """后台线程：检查 GitHub 最新 release。silent=True 时只在有更新时弹窗。"""
         try:
-            url = "https://api.github.com/repos/Crowheart0/Water-redstart_the_chirping_viewer/releases?per_page=1"
+            url = "https://api.github.com/repos/Crowheart0/Water-redstart_the_chirping_viewer/releases/latest"
             req = urllib.request.Request(url, headers={"User-Agent": "Water-redstart-Viewer"})
             with urllib.request.urlopen(req, timeout=10) as resp:
-                releases = json.loads(resp.read().decode())
-            
-            if not releases or not isinstance(releases, list) or len(releases) == 0:
+                data = json.loads(resp.read().decode())
+
+            if not isinstance(data, dict):
                 return
-            data = releases[0]  # 取最新一条（含 prerelease）
             
             tag = data.get("tag_name", "")
             latest_ver = self._parse_version(tag)
@@ -1670,20 +1976,9 @@ class ImageViewer:
                 # 检查是否被用户忽略
                 if self.ignored_version and self._parse_version(self.ignored_version) >= latest_ver:
                     return
-                # 找到 .exe 或 .zip 下载链接
-                download_url = None
-                asset_name = None
-                for asset in data.get("assets", []):
-                    name = asset.get("name", "")
-                    url_dl = asset.get("browser_download_url", "")
-                    if name.lower().endswith('.exe') or name.lower().endswith('.zip'):
-                        download_url = url_dl
-                        asset_name = name
-                        break
-                # 如果没有 asset，用 zipball
-                if not download_url:
-                    download_url = data.get("zipball_url", "")
-                    asset_name = f"Water-redstart_{tag}.zip"
+                asset = _select_release_asset(data.get("assets", []))
+                download_url = asset.get("browser_download_url", "") if asset else ""
+                asset_name = asset.get("name", "") if asset else ""
                 
                 release_notes = data.get("body", "")[:200]
                 release_url = data.get("html_url", "")
@@ -1763,7 +2058,10 @@ class ImageViewer:
         
         def do_update():
             dlg.destroy()
-            self._do_download_update(download_url, asset_name)
+            if download_url and asset_name:
+                self._do_download_update(download_url, asset_name)
+            else:
+                webbrowser.open(release_url)
         
         def do_open_release():
             webbrowser.open(release_url)
@@ -1778,7 +2076,8 @@ class ImageViewer:
                 messagebox.showinfo("🔕 已忽略", f"已忽略 {tag} 版本~\n\n下次有新版本时小鸟会再来通知你！")
         
         # 第一行：主要操作
-        tk.Button(btn_frame1, text="🕊️ 好的，飞去更新！", font=("Microsoft YaHei", 11, "bold"),
+        update_button_text = "🕊️ 下载当前平台版本" if download_url else "🌐 前往发布页下载"
+        tk.Button(btn_frame1, text=update_button_text, font=("Microsoft YaHei", 11, "bold"),
                   bg="#81C784", fg="white", bd=0, cursor="hand2",
                   activebackground="#66BB6A", padx=18, pady=8,
                   command=do_update).pack(side=tk.LEFT, padx=6)
@@ -1831,7 +2130,11 @@ class ImageViewer:
         
         def download_thread():
             try:
-                dest_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+                if sys.platform == 'darwin':
+                    dest_dir = os.path.expanduser("~/Downloads")
+                else:
+                    dest_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+                os.makedirs(dest_dir, exist_ok=True)
                 dest_path = os.path.join(dest_dir, asset_name)
                 
                 req = urllib.request.Request(download_url, headers={"User-Agent": "Water-redstart-Viewer"})
@@ -1883,11 +2186,19 @@ class ImageViewer:
                                  bg="#E8F5E9", fg="#2E7D32").pack(pady=(20, 10))
                         tk.Label(done, text=f"📁 文件位置：\n{dest_path}", font=("Consolas", 8),
                                  bg="#E8F5E9", fg="#555555", wraplength=360).pack(pady=5)
-                        tk.Label(done, text="💡 请关闭当前程序，然后双击新文件即可~",
+                        install_hint = (
+                            "💡 双击 ZIP 解压后，把 Water-redstart.app 拖入“应用程序”~"
+                            if sys.platform == 'darwin'
+                            else "💡 请关闭当前程序，然后双击新文件即可~"
+                        )
+                        tk.Label(done, text=install_hint,
                                  font=("Microsoft YaHei", 10), bg="#E8F5E9", fg="#388E3C").pack(pady=5)
                         
                         def open_folder():
-                            os.startfile(dest_dir) if sys.platform == 'win32' else None
+                            if sys.platform == 'win32':
+                                os.startfile(dest_dir)
+                            elif sys.platform == 'darwin':
+                                subprocess.Popen(["open", dest_dir])
                         tk.Button(done, text="📂 打开文件所在位置", font=("Microsoft YaHei", 10, "bold"),
                                   bg="#81C784", fg="white", bd=0, cursor="hand2",
                                   activebackground="#66BB6A", padx=16, pady=6,

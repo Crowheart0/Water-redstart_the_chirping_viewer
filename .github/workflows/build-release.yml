@@ -1,0 +1,130 @@
+name: Build and release
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "codex/**"
+      - "fix/**"
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            os: windows-latest
+            package: windows_x64
+          - label: macOS Apple Silicon
+            os: macos-15
+            package: macos_arm64
+          - label: macOS Intel
+            os: macos-15-intel
+            package: macos_x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+
+      - name: Read application version
+        id: version
+        shell: bash
+        run: |
+          version="$(python -c 'import re; print(re.search(r"^CURRENT_VERSION = \"([^\"]+)\"", open("photo_viewer.py", encoding="utf-8-sig").read(), re.MULTILINE).group(1))')"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          if [[ "${GITHUB_REF}" == refs/tags/* && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match CURRENT_VERSION ${version}" >&2
+            exit 1
+          fi
+
+      - name: Install build dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-build.txt
+
+      - name: Run unit tests
+        run: |
+          python -B -m unittest -v test_photo_viewer
+          python -B -m unittest discover -s tests -v
+
+      - name: Build application
+        run: python -m PyInstaller --noconfirm --clean Water-redstart.spec
+
+      - name: Package Windows asset
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $name = "Water-redstart_v${version}_windows_x64.exe"
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Move-Item "dist/Water-redstart.exe" "release-assets/$name"
+          $hash = (Get-FileHash "release-assets/$name" -Algorithm SHA256).Hash.ToLower()
+          "$hash *$name" | Set-Content -Encoding ascii "release-assets/$name.sha256"
+
+      - name: Package macOS asset
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          name="Water-redstart_v${version}_${{ matrix.package }}.zip"
+          mkdir -p release-assets
+          ditto -c -k --sequesterRsrc --keepParent dist/Water-redstart.app "release-assets/${name}"
+          (cd release-assets && shasum -a 256 "${name}" > "${name}.sha256")
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.package }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download packaged assets
+        uses: actions/download-artifact@v7
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" release-assets/* --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" release-assets/* \
+              --verify-tag \
+              --generate-notes \
+              --title "Water-redstart ${GITHUB_REF_NAME}"
+          fi

@@ -1,0 +1,8 @@
+.DS_Store
+.birdviewer_config.json
+.venv*/
+__pycache__/
+*.py[cod]
+build/
+dist/
+
