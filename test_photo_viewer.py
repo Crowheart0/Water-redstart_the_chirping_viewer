@@ -29,7 +29,7 @@ class FakeTk:
 class ZoomTests(unittest.TestCase):
     def make_viewer(self, precise_deltas=(0, 10)):
         viewer = ImageViewer.__new__(ImageViewer)
-        viewer.current_img_obj = object()
+        viewer.current_img_obj = SimpleNamespace(width=1000, height=800)
         viewer.is_fit = True
         viewer.current_scale = 1.0
         viewer.im_x = 500.0
@@ -42,6 +42,8 @@ class ZoomTests(unittest.TestCase):
             viewer.display_calls += 1
 
         viewer.display_image = display_image
+        viewer._schedule_render = display_image
+        viewer._request_detail = mock.Mock()
         return viewer
 
     def assert_cursor_anchor_is_stable(self, viewer, event, old_anchor):
