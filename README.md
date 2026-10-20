@@ -1,6 +1,17 @@
 ﻿# 🐦 Water-redstart: the chirping viewer v3.6.0 (双平台版) - 极速鸟类照片挑选小助手
 
 ## 🪟 Windows 使用说明
+
+### RAW 显示和流畅缩放
+
+- Windows 默认使用已安装的系统 WIC RAW 编解码器；“设置 → RAW 显示方式”可切换为相机内嵌预览。缺少编解码器时自动回退，并在标题栏显示。相机预览与系统 RAW 的画面可能不同，不能保证复现 Windows 照片的 HDR 或应用自身处理。
+- 处理照片 ICC、明确标记的 Adobe RGB 和 Windows 默认显示器 ICC。多显示器切换及用户 NEF 的最终颜色仍需实机对照验证。
+- 翻页先显示最长边 1600 像素的预览，放大时后台读取所选画质的细节并保持查看位置；3 个固定后台线程按最新位置优先预读，缓存按内存大小限制为 256 MiB（省内存模式 96 MiB）。Super 模式保留较大的预读窗口。
+- 无损系统 RAW 预览缓存在临时目录的 `WaterRedstart/preview-v2` 中（约 1 GiB 上限）；源文件或显示配置变化后重新解码。首次 RAW 解码仍可能等待，缓存预算不等于程序总内存。
+- 多级缩小图减少大图重复缩放，连续滚轮、触控板和拖动事件合并为约 16ms 一次绘制。Windows 鼠标及 macOS 高精度触控板入口保留。
+
+测试：`python -B -m unittest -v test_photo_viewer` 与 `python -B -m unittest discover -s tests -v`。测试覆盖系统解码、色彩、缓存失效、线程取消、分级绘制、指针定位和真实 Tk 窗口交互。
+
 从 [GitHub Releases](https://github.com/Crowheart0/Water-redstart_the_chirping_viewer/releases/latest) 下载 `Water-redstart_v3.6.0_windows_x64.exe`。无需安装 Python，双击即可运行；也可以把它放在桌面，通过 `文件 → 打开照片文件夹...` 选择图库。
 
 ---

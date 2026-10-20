@@ -10,7 +10,6 @@ if sys.platform == 'win32':
 import json
 import io
 import platform
-import queue
 import threading
 import time
 import rawpy
@@ -18,6 +17,9 @@ import urllib.request
 import urllib.error
 import tempfile
 import webbrowser
+from functools import partial
+from image_loader import ImageLoader, read_image, read_for_display, get_monitor_profile
+from image_render import render_viewport
 
 CURRENT_VERSION = "3.6.0"
 APPLICATION_TITLE = f"🐦 Water-redstart: the chirping viewer v{CURRENT_VERSION}"
@@ -73,36 +75,11 @@ def _select_release_asset(assets, platform_name=None, machine_name=None):
 
 
 def _decode_image_fast(img_path, size_val):
-    """读取并缩放图片；本函数不创建、读取或销毁任何 Tk 对象。"""
-    ext = os.path.splitext(img_path)[1].lower()
-    size_val = max(1, int(size_val))
-    target_size = (size_val, size_val)
+    """Compatibility decoder; contains no Tk access."""
     try:
-        if ext in ('.arw', '.sr2', '.srf', '.crw', '.cr2', '.cr3', '.nef', '.nrw', '.dng', '.orf', '.rw2', '.raf', '.pef'):
-            # 对于RAW照片，使用rawpy提取内嵌的预览图（通常是jpeg格式）
-            with rawpy.imread(img_path) as raw:
-                try:
-                    thumb = raw.extract_thumb()
-                except rawpy.LibRawNoThumbnailError:
-                    rgb = raw.postprocess(half_size=True, use_camera_wb=True)
-                    img = Image.fromarray(rgb)
-                    img.thumbnail(target_size, Image.Resampling.LANCZOS)
-                    return ImageOps.exif_transpose(img)
-
-            if thumb.format in (rawpy.ThumbFormat.JPEG, rawpy.ThumbFormat.BITMAP):
-                img = Image.open(io.BytesIO(thumb.data))
-                img.draft("RGB", target_size)
-                img = ImageOps.exif_transpose(img)
-                img.thumbnail(target_size, Image.Resampling.LANCZOS)
-                return img
-
-        img = Image.open(img_path)
-        img.draft("RGB", target_size)
-        img = ImageOps.exif_transpose(img)
-        img.thumbnail(target_size, Image.Resampling.LANCZOS)
-        return img
-    except Exception as e:
-        print(f"解析图片加速失败 {img_path}: {e}")
+        return read_image(img_path, max(1, int(size_val)))
+    except Exception as error:
+        print(f"无法读取照片 {img_path}: {error}")
         return None
 
 
@@ -120,43 +97,8 @@ def _build_preload_indices(current_idx, image_count, preload_count):
     return tuple(indices)
 
 
-def _execute_preload_request(request):
-    """执行一份不可变预读快照；只接触普通 Python 数据和 PIL/rawpy。"""
-    cancel_event = request["cancel_event"]
-    cache = request["cache"]
-    cache_lock = request["cache_lock"]
-    image_names = request["image_names"]
-    current_dir = request["current_dir"]
-    image_quality = request["image_quality"]
-
-    for idx in request["indices"]:
-        if cancel_event.is_set():
-            return
-
-        with cache_lock:
-            if idx in cache:
-                continue
-
-        img_path = os.path.join(current_dir, image_names[idx])
-        img_obj = _decode_image_fast(img_path, image_quality)
-        if cancel_event.is_set():
-            return
-        if img_obj is not None:
-            with cache_lock:
-                cache[idx] = img_obj
 
 
-def _preload_worker_loop(request_queue):
-    """单一守护 worker：串行处理预读，避免高速翻页产生解码线程风暴。"""
-    while True:
-        request = request_queue.get()
-        if request is None:
-            return
-        try:
-            _execute_preload_request(request)
-        except Exception as e:
-            # 单张或单次请求失败不能终止后续预读。
-            print(f"后台预读失败: {e}")
 
 class ImageViewer:
     def __init__(self, root):
@@ -187,18 +129,15 @@ class ImageViewer:
         self.select_folder_name = "SELECT"
         self.history = []  # 记录操作历史用于撤销
         
-        # 图片预加载缓存。后台只有一个守护 worker，请求队列只保留最新位置。
-        self.image_cache = {}
-        self._image_cache_lock = threading.Lock()
-        self._preload_requests = queue.Queue(maxsize=1)
-        self._preload_cancel_event = None
-        self.preload_thread = threading.Thread(
-            target=_preload_worker_loop,
-            args=(self._preload_requests,),
-            daemon=True,
-            name="birdviewer-preload",
-        )
-        self.preload_thread.start()
+        self.monitor_profile = get_monitor_profile()
+        self.image_loader = ImageLoader(workers=3)
+        self.detail_loader = ImageLoader()
+        self._load_token = None
+        self._detail_token = None
+        self._detail_requested = False
+        self._render_job = None
+        self._canvas_image_id = None
+        self.root.after(20, self._poll_image_loader)
 
         self._navigation_job = None
         self._pending_navigation_delta = 0
@@ -211,6 +150,7 @@ class ImageViewer:
         # 尝试读取上一次的进度配置
         self.config_file = os.path.join(self.current_dir, ".birdviewer_config.json")
         self.image_quality = tk.IntVar(value=8000)
+        self.raw_mode = tk.StringVar(value='windows' if sys.platform == 'win32' else 'camera')
         self.super_mode = tk.BooleanVar(value=False)  # Super 连拍模式
         self.ignored_version = None  # 用户忽略的更新版本
         self.load_config()
@@ -484,7 +424,7 @@ class ImageViewer:
         settings_menu.add_checkbutton(label="倒序选片 (从后往前)", variable=self.reverse_var, command=self.toggle_reverse)
         
         self.low_memory_mode = tk.BooleanVar(value=False)
-        settings_menu.add_checkbutton(label="省内存模式 (预加载4张)", variable=self.low_memory_mode)
+        settings_menu.add_checkbutton(label="省内存模式 (缓存上限96MB)", variable=self.low_memory_mode)
         settings_menu.add_checkbutton(label="🚀 Super 连拍模式 (启动24张/翻页16张)", variable=self.super_mode)
         
         quality_menu = tk.Menu(settings_menu, tearoff=0)
@@ -492,6 +432,13 @@ class ImageViewer:
         quality_menu.add_radiobutton(label="4K (平衡)", variable=self.image_quality, value=4000, command=self.change_quality)
         quality_menu.add_radiobutton(label="8K (默认，最高清)", variable=self.image_quality, value=8000, command=self.change_quality)
         settings_menu.add_cascade(label="照片显示画质", menu=quality_menu)
+        raw_menu = tk.Menu(settings_menu, tearoff=0)
+        if sys.platform == 'win32':
+            raw_menu.add_radiobutton(label="Windows 系统 RAW（与照片应用对照）",
+                                     variable=self.raw_mode, value='windows', command=self.change_quality)
+        raw_menu.add_radiobutton(label="相机内嵌预览（相机直出效果）",
+                                 variable=self.raw_mode, value='camera', command=self.change_quality)
+        settings_menu.add_cascade(label="RAW 显示方式", menu=raw_menu)
         
         settings_menu.add_separator()
         
@@ -829,6 +776,7 @@ class ImageViewer:
                         self.index = self.images.index(last_img)
                     self.keep_top_bar_in_fullscreen = config.get("keep_top_bar_in_fullscreen", False)
                     self.image_quality.set(config.get("image_quality", 8000))
+                    self.raw_mode.set(config.get("raw_mode", self.raw_mode.get()))
                     self.select_folder_name = config.get("select_folder_name", "SELECT")
                     self.ignored_version = config.get("ignored_version", None)
                     self.super_mode.set(config.get("super_mode", False))
@@ -863,6 +811,7 @@ class ImageViewer:
                         "last_image": self.images[self.index],
                         "keep_top_bar_in_fullscreen": getattr(self, 'keep_top_bar_in_fullscreen', False),
                         "image_quality": self.image_quality.get(),
+                        "raw_mode": self.raw_mode.get(),
                         "select_folder_name": self.select_folder_name,
                         "ignored_version": getattr(self, 'ignored_version', None),
                         "super_mode": self.super_mode.get()
@@ -889,32 +838,17 @@ class ImageViewer:
         return _decode_image_fast(img_path, size_val)
 
     def _cancel_preload(self, clear_cache=False):
-        """取消运行中及排队中的预读；正在解码的单张会在完成后丢弃。"""
-        if self._preload_cancel_event is not None:
-            self._preload_cancel_event.set()
-            self._preload_cancel_event = None
+        """Invalidate in-flight loads when folder, order or settings change."""
+        self.image_loader.reset()
+        self.detail_loader.reset()
+        self._load_token = self._detail_token = None
 
-        try:
-            while True:
-                stale_request = self._preload_requests.get_nowait()
-                if stale_request is not None:
-                    stale_request["cancel_event"].set()
-        except queue.Empty:
-            pass
-
-        if clear_cache:
-            with self._image_cache_lock:
-                self.image_cache = {}
-
-    def close(self):
-        """在 UI 线程保存最终进度并停止后台预读。"""
+    def close(self, save_progress=True):
         self._cancel_pending_navigation()
-        self.save_config()
-        self._cancel_preload(clear_cache=True)
-        try:
-            self._preload_requests.put_nowait(None)
-        except queue.Full:
-            pass
+        if save_progress:
+            self.save_config()
+        self.image_loader.close()
+        self.detail_loader.close()
         self.root.destroy()
                         
     def show_end_dialog(self):
@@ -977,8 +911,7 @@ class ImageViewer:
             if choice == 4:
                 self.close()
             else:
-                self._cancel_preload(clear_cache=True)
-                self.root.destroy()
+                self.close(save_progress=False)
 
         end_window.protocol("WM_DELETE_WINDOW", lambda: (setattr(self, 'end_dialog_open', False), end_window.destroy()))
 
@@ -1007,60 +940,82 @@ class ImageViewer:
             self.index = int(new_idx)
             self.load_image()
 
-    def start_preload(self):
-        """在 UI 线程冻结设置快照，然后把纯 Python 请求交给后台 worker。"""
-        current_idx = int(self.index)
-        image_names = tuple(self.images)
-        current_dir = str(self.current_dir)
-        image_quality = int(self.image_quality.get())
-        super_mode = bool(self.super_mode.get())
-        low_memory_mode = bool(
-            getattr(self, 'low_memory_mode', None) and self.low_memory_mode.get()
-        )
-
-        with self._image_cache_lock:
-            cached_count = len(self.image_cache)
-
-        is_startup = current_idx <= 2 and cached_count < 10
-        if super_mode:
-            preload_count = PRELOAD_SUPER_STARTUP_COUNT if is_startup else PRELOAD_SUPER_COUNT
-            if is_startup:
-                old_text = self.top_info_label.cget("text")
-                self.top_info_label.config(
-                    text=f"🚀 Super 连拍模式启动中，小鸟正在预加载 {preload_count} 张照片..."
-                )
-                # 加载完成后恢复（约 2 秒后）
-                self.root.after(2500, lambda: self.top_info_label.config(text=old_text) if self.top_info_label.winfo_exists() else None)
+    def _preload_neighbors(self):
+        """Snapshot settings on the UI thread, preserving the Super mode window."""
+        if self.low_memory_mode.get():
+            count = PRELOAD_LOW_MEMORY_COUNT
+        elif self.super_mode.get():
+            count = PRELOAD_SUPER_STARTUP_COUNT if self.index <= 2 else PRELOAD_SUPER_COUNT
         else:
-            preload_count = PRELOAD_LOW_MEMORY_COUNT if low_memory_mode else PRELOAD_NORMAL_COUNT
+            count = PRELOAD_NORMAL_COUNT
+        indices = _build_preload_indices(self.index, len(self.images), count)
+        indices = sorted(indices, key=lambda index: (index < self.index, abs(index - self.index)))
+        return tuple(os.path.join(self.current_dir, self.images[index]) for index in indices)
 
-        indices = _build_preload_indices(current_idx, len(image_names), preload_count)
-        keep_indices = set(indices)
-        keep_indices.add(current_idx)
+    def _poll_image_loader(self):
+        result = self.image_loader.take_result()
+        if result is not None and result[0] == self._load_token:
+            _, image, error = result
+            if image is not None:
+                self._show_loaded_image(image)
+            else:
+                print(f"无法打开图片 {self.images[self.index]}: {error}")
+                self.index += 1
+                if self.index < len(self.images):
+                    self.load_image()
+                else:
+                    self.index = len(self.images) - 1
+                    self.show_end_dialog()
+        detail = self.detail_loader.take_result()
+        if detail is not None and detail[0] == self._detail_token:
+            _, image, error = detail
+            if image is not None and self.current_img_obj is not None:
+                old_w, old_h = self.current_img_obj.size
+                factor_x, factor_y = image.width / old_w, image.height / old_h
+                self.im_x *= factor_x
+                self.im_y *= factor_y
+                self.current_scale /= factor_x
+                if getattr(self, 'is_magnifying', False) and hasattr(self, 'pre_magnify_state'):
+                    state = self.pre_magnify_state
+                    state['im_x'] *= factor_x
+                    state['im_y'] *= factor_y
+                    state['current_scale'] /= factor_x
+                self.current_img_obj = image
+                self.root.title(self.root.title().replace(' | 高清细节加载中…', ''))
+                self._schedule_render()
+            elif error:
+                print(f'细节加载失败: {error}')
+                self.root.title(self.root.title().replace('高清细节加载中…', '高清读取失败，保留预览'))
+        self.root.after(8, self._poll_image_loader)
 
-        self._cancel_preload()
-        cancel_event = threading.Event()
-        self._preload_cancel_event = cancel_event
 
-        with self._image_cache_lock:
-            cache = self.image_cache
-            for idx in tuple(cache):
-                if idx not in keep_indices:
-                    del cache[idx]
+    def _show_loaded_image(self, image):
+        self.current_img_obj = image
+        self.is_fit = True
+        self.is_magnifying = False
+        self.display_image()
+        label = image.info.get('decoder_label')
+        if label and os.path.splitext(self.images[self.index])[1].lower() in ('.nef', '.nrw'):
+            self.root.title(self.root.title() + ' | ' + label)
 
-        request = {
-            "current_dir": current_dir,
-            "image_names": image_names,
-            "indices": indices,
-            "image_quality": image_quality,
-            "cache": cache,
-            "cache_lock": self._image_cache_lock,
-            "cancel_event": cancel_event,
-        }
-        try:
-            self._preload_requests.put_nowait(request)
-        except queue.Full:
-            cancel_event.set()
+
+    def _request_detail(self):
+        if self._detail_requested or self.current_img_obj is None:
+            return
+        self._detail_requested = True
+        if self.image_quality.get() <= 1600:
+            return
+        decoder = partial(read_for_display, raw_mode=self.raw_mode.get(), monitor_profile=self.monitor_profile)
+        self.detail_loader.decoder = decoder
+        path = os.path.join(self.current_dir, self.images[self.index])
+        self._detail_token, image = self.detail_loader.request(path, self.image_quality.get())
+        self.root.title(self.root.title() + ' | 高清细节加载中…')
+
+
+    def _schedule_render(self):
+        if self._render_job is None:
+            self._render_job = self.root.after(16, self.display_image)
+
 
     def show_empty_state(self):
         if hasattr(self, 'empty_frame') and self.empty_frame.winfo_exists():
@@ -1187,43 +1142,31 @@ class ImageViewer:
             return
 
         img_path = os.path.join(self.current_dir, self.images[self.index])
-        
-        try:
-            # 优先从多线程缓存中拿，拿到直接显示
-            with self._image_cache_lock:
-                cached_img = self.image_cache.get(self.index)
-            if cached_img is not None:
-                self.current_img_obj = cached_img
-            else:
-                # Tk 变量只在 UI 线程读取，并把普通整数传给解码函数。
-                image_quality = int(self.image_quality.get())
-                raw_img = self.read_image_fast(img_path, image_quality)
-                if not raw_img:
-                    raise Exception("解析图片返回为空")
-                self.current_img_obj = raw_img
-                with self._image_cache_lock:
-                    self.image_cache[self.index] = raw_img
+        self.detail_loader.reset()
+        self._detail_token = None
+        self._detail_requested = False
+        if self._render_job is not None:
+            self.root.after_cancel(self._render_job)
+            self._render_job = None
 
-            self.is_fit = True
-            self.update_title()
-            
-            # Update progress bar
-            self.progress_scale.set(self.index)
-            
-            self.display_image()
-            
-            # 本页渲染完毕后，触发邻近图片预读，并延迟保存本次进度。
-            self.start_preload()
-            self.schedule_save_config()
-            
-        except Exception as e:
-            print(f"无法打开图片 {img_path}: {e}")
-            self.index += 1
-            if self.index < len(self.images):
-                self.root.after(1, self.load_image)
-            else:
-                self.index = len(self.images) - 1
-                self.show_end_dialog()
+        neighbors = self._preload_neighbors()
+        self.image_loader.decoder = partial(read_for_display, raw_mode=self.raw_mode.get(),
+                                            monitor_profile=self.monitor_profile)
+        self._load_token, image = self.image_loader.request(
+            img_path, min(1600, self.image_quality.get()), neighbors, self.low_memory_mode.get())
+        self.update_title()
+        self.progress_scale.set(self.index)
+        self.schedule_save_config()
+        if image is not None:
+            self._show_loaded_image(image)
+        else:
+            # Do not show the previous photo under the new file's name.
+            self.current_img_obj = None
+            self.tk_image = None
+            self.canvas.delete('all')
+            self.canvas.create_text(self.canvas.winfo_width() // 2,
+                                    self.canvas.winfo_height() // 2,
+                                    text='正在加载照片…', fill='#555555')
 
     @staticmethod
     def _decode_touchpad_delta(packed_delta):
@@ -1251,12 +1194,14 @@ class ImageViewer:
         cursor_im_x = self.im_x + (x - ww / 2) / self.current_scale
         cursor_im_y = self.im_y + (y - wh / 2) / self.current_scale
 
-        self.current_scale *= scale_factor
+        fit_scale = min(ww / self.current_img_obj.width, wh / self.current_img_obj.height)
+        self.current_scale = max(fit_scale * 0.05, min(fit_scale * 64, self.current_scale * scale_factor))
 
         self.im_x = cursor_im_x - (x - ww / 2) / self.current_scale
         self.im_y = cursor_im_y - (y - wh / 2) / self.current_scale
 
-        self.display_image()
+        self._request_detail()
+        self._schedule_render()
         return "break"
 
     def on_mouse_wheel(self, event):
@@ -1304,9 +1249,11 @@ class ImageViewer:
         self.im_x -= dx / self.current_scale
         self.im_y -= dy / self.current_scale
         
-        self.display_image()
+        self._schedule_render()
 
     def on_space_press(self, event=None):
+        if self.current_img_obj is None:
+            return
         if not getattr(self, 'is_magnifying', False):
             self.is_magnifying = True
             # 保存放大前的浏览状态
@@ -1316,7 +1263,8 @@ class ImageViewer:
                 'im_x': getattr(self, 'im_x', 0),
                 'im_y': getattr(self, 'im_y', 0)
             }
-            self.display_image()
+            self._request_detail()
+            self._schedule_render()
 
     def on_space_release(self, event=None):
         if getattr(self, 'is_magnifying', False):
@@ -1328,9 +1276,12 @@ class ImageViewer:
                 self.current_scale = state['current_scale']
                 self.im_x = state['im_x']
                 self.im_y = state['im_y']
-            self.display_image()
+            self._schedule_render()
 
     def display_image(self, event=None):
+        if self._render_job is not None:
+            self.root.after_cancel(self._render_job)
+            self._render_job = None
         if not self.current_img_obj:
             return
 
@@ -1368,34 +1319,30 @@ class ImageViewer:
         crop_bottom = min(img_h, bottom)
 
         if crop_right > crop_left and crop_bottom > crop_top:
-            cropped = self.current_img_obj.crop((crop_left, crop_top, crop_right, crop_bottom))
-            
             dest_left = max(0, (crop_left - left) * self.current_scale)
             dest_top = max(0, (crop_top - top) * self.current_scale)
             dest_w = max(1, (crop_right - crop_left) * self.current_scale)
             dest_h = max(1, (crop_bottom - crop_top) * self.current_scale)
 
             # 使用 BILINEAR 加速交互期的拖动与缩放刷新
-            resized_img = cropped.resize((int(dest_w), int(dest_h)), Image.Resampling.BILINEAR)
-            
-            if getattr(self, 'is_magnifying', False):
-                # 模拟轻微锐化：半径 0.5，强度约 30%
-                resized_img = resized_img.filter(ImageFilter.UnsharpMask(radius=0.5, percent=30, threshold=0))
-                
+            resized_img = render_viewport(self.current_img_obj,
+                (crop_left, crop_top, crop_right, crop_bottom), (int(dest_w), int(dest_h)))
             self.tk_image = ImageTk.PhotoImage(resized_img)
-
-            self.canvas.delete("all")
-            self.canvas.create_image(
-                dest_left + int(dest_w/2), 
-                dest_top + int(dest_h/2), 
-                image=self.tk_image, anchor=tk.CENTER
-            )
+            x, y = dest_left + int(dest_w / 2), dest_top + int(dest_h / 2)
+            if self._canvas_image_id is not None and self.canvas.type(self._canvas_image_id):
+                self.canvas.itemconfig(self._canvas_image_id, image=self.tk_image)
+                self.canvas.coords(self._canvas_image_id, x, y)
+            else:
+                self.canvas.delete('all')
+                self._canvas_image_id = self.canvas.create_image(x, y, image=self.tk_image, anchor=tk.CENTER)
+        else:
+            if self._canvas_image_id is not None:
+                self.canvas.delete(self._canvas_image_id)
+                self._canvas_image_id = None
 
     def on_resize(self, event):
         if hasattr(self, 'canvas') and event.widget == self.canvas:
-            if self._resize_job:
-                self.root.after_cancel(self._resize_job)
-            self._resize_job = self.root.after(100, self.display_image)
+            self._schedule_render()
 
     def _cancel_pending_navigation(self):
         if self._navigation_job is not None:

@@ -12,6 +12,7 @@ from unittest import mock
 from PIL import Image
 
 import photo_viewer
+from image_loader import ImageLoader, read_for_display
 
 
 class FakeRoot:
@@ -54,10 +55,10 @@ class MainThreadVariable:
 class PreloadTests(unittest.TestCase):
     def test_background_preload_code_has_no_tk_or_viewer_access(self):
         source = "\n".join(
-            inspect.getsource(function)
+            textwrap.dedent(inspect.getsource(function))
             for function in (
-                photo_viewer._execute_preload_request,
-                photo_viewer._preload_worker_loop,
+                ImageLoader._run,
+                read_for_display,
             )
         )
         tree = ast.parse(textwrap.dedent(source))
@@ -66,7 +67,7 @@ class PreloadTests(unittest.TestCase):
         }
 
         self.assertNotIn("tk", referenced_names)
-        self.assertNotIn("self", referenced_names)
+        self.assertNotIn("root", referenced_names)
 
     def test_decoder_does_not_construct_tk_variables(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -84,28 +85,27 @@ class PreloadTests(unittest.TestCase):
         self.assertLessEqual(max(decoded.size), 64)
 
     def test_cancelled_preload_discards_in_flight_result(self):
-        cancel_event = threading.Event()
-        cache = {}
+        started, release = threading.Event(), threading.Event()
+        def decode(_path, _quality):
+            started.set()
+            release.wait(3)
+            return Image.new('RGB', (10, 10))
+        loader = ImageLoader(decode)
+        self.addCleanup(loader.close)
+        loader.request('old.jpg', 2000)
+        self.assertTrue(started.wait(3))
+        loader.reset()
+        release.set()
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            with loader.condition:
+                if not loader.in_flight:
+                    break
+            time.sleep(0.005)
+        self.assertEqual(loader.cache, {})
+        self.assertIsNone(loader.take_result())
 
-        def cancel_during_decode(_path, _quality):
-            cancel_event.set()
-            return object()
-
-        request = {
-            "current_dir": "/photos",
-            "image_names": ("0.jpg", "1.jpg"),
-            "indices": (1,),
-            "image_quality": 2000,
-            "cache": cache,
-            "cache_lock": threading.Lock(),
-            "cancel_event": cancel_event,
-        }
-        with mock.patch.object(photo_viewer, "_decode_image_fast", cancel_during_decode):
-            photo_viewer._execute_preload_request(request)
-
-        self.assertEqual(cache, {})
-
-    def test_start_preload_snapshots_tk_values_on_main_thread(self):
+    def test_preload_neighbors_reads_settings_on_main_thread(self):
         viewer = photo_viewer.ImageViewer.__new__(photo_viewer.ImageViewer)
         viewer.index = 2
         viewer.images = [f"{idx}.jpg" for idx in range(20)]
@@ -113,17 +113,10 @@ class PreloadTests(unittest.TestCase):
         viewer.image_quality = MainThreadVariable(4000)
         viewer.super_mode = MainThreadVariable(False)
         viewer.low_memory_mode = MainThreadVariable(True)
-        viewer.image_cache = {}
-        viewer._image_cache_lock = threading.Lock()
-        viewer._preload_requests = queue.Queue(maxsize=1)
-        viewer._preload_cancel_event = None
-
-        viewer.start_preload()
-        request = viewer._preload_requests.get_nowait()
-
-        self.assertEqual(request["image_quality"], 4000)
-        self.assertEqual(len([idx for idx in request["indices"] if idx > viewer.index]), 4)
-        self.assertTrue(all(isinstance(name, str) for name in request["image_names"]))
+        neighbors = viewer._preload_neighbors()
+        self.assertEqual(len(neighbors), 6)
+        self.assertTrue(all(isinstance(name, str) for name in neighbors))
+        self.assertTrue(neighbors[0].endswith('3.jpg'))
 
     def test_preload_window_is_small_and_bounded(self):
         indices = photo_viewer._build_preload_indices(10, 100, photo_viewer.PRELOAD_NORMAL_COUNT)
