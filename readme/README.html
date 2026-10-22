@@ -1,108 +1,257 @@
 <!DOCTYPE html>
-<!-- saved from url=(0082)file:///C:/Users/xinji/AppData/Local/Temp/crossnote2026210-21160-1hwdyqv.dehh.html -->
-<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-      <title>README</title>
-      
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      
-      <link rel="stylesheet" href="./README_files/katex.min.css">
-      
-      
-      
-      
-      
-      <style>
-      code[class*=language-],pre[class*=language-]{color:#333;background:0 0;font-family:Consolas,"Liberation Mono",Menlo,Courier,monospace;text-align:left;white-space:pre;word-spacing:normal;word-break:normal;word-wrap:normal;line-height:1.4;-moz-tab-size:8;-o-tab-size:8;tab-size:8;-webkit-hyphens:none;-moz-hyphens:none;-ms-hyphens:none;hyphens:none}pre[class*=language-]{padding:.8em;overflow:auto;border-radius:3px;background:#f5f5f5}:not(pre)>code[class*=language-]{padding:.1em;border-radius:.3em;white-space:normal;background:#f5f5f5}.token.blockquote,.token.comment{color:#969896}.token.cdata{color:#183691}.token.doctype,.token.macro.property,.token.punctuation,.token.variable{color:#333}.token.builtin,.token.important,.token.keyword,.token.operator,.token.rule{color:#a71d5d}.token.attr-value,.token.regex,.token.string,.token.url{color:#183691}.token.atrule,.token.boolean,.token.code,.token.command,.token.constant,.token.entity,.token.number,.token.property,.token.symbol{color:#0086b3}.token.prolog,.token.selector,.token.tag{color:#63a35c}.token.attr-name,.token.class,.token.class-name,.token.function,.token.id,.token.namespace,.token.pseudo-class,.token.pseudo-element,.token.url-reference .token.variable{color:#795da3}.token.entity{cursor:help}.token.title,.token.title .token.punctuation{font-weight:700;color:#1d3e81}.token.list{color:#ed6a43}.token.inserted{background-color:#eaffea;color:#55a532}.token.deleted{background-color:#ffecec;color:#bd2c00}.token.bold{font-weight:700}.token.italic{font-style:italic}.language-json .token.property{color:#183691}.language-markup .token.tag .token.punctuation{color:#333}.language-css .token.function,code.language-css{color:#0086b3}.language-yaml .token.atrule{color:#63a35c}code.language-yaml{color:#183691}.language-ruby .token.function{color:#333}.language-markdown .token.url{color:#795da3}.language-makefile .token.symbol{color:#795da3}.language-makefile .token.variable{color:#183691}.language-makefile .token.builtin{color:#0086b3}.language-bash .token.keyword{color:#0086b3}pre[data-line]{position:relative;padding:1em 0 1em 3em}pre[data-line] .line-highlight-wrapper{position:absolute;top:0;left:0;background-color:transparent;display:block;width:100%}pre[data-line] .line-highlight{position:absolute;left:0;right:0;padding:inherit 0;margin-top:1em;background:hsla(24,20%,50%,.08);background:linear-gradient(to right,hsla(24,20%,50%,.1) 70%,hsla(24,20%,50%,0));pointer-events:none;line-height:inherit;white-space:pre}pre[data-line] .line-highlight:before,pre[data-line] .line-highlight[data-end]:after{content:attr(data-start);position:absolute;top:.4em;left:.6em;min-width:1em;padding:0 .5em;background-color:hsla(24,20%,50%,.4);color:#f4f1ef;font:bold 65%/1.5 sans-serif;text-align:center;vertical-align:.3em;border-radius:999px;text-shadow:none;box-shadow:0 1px #fff}pre[data-line] .line-highlight[data-end]:after{content:attr(data-end);top:auto;bottom:.4em}html body{font-family:'Helvetica Neue',Helvetica,'Segoe UI',Arial,freesans,sans-serif;font-size:16px;line-height:1.6;color:#333;background-color:#fff;overflow:initial;box-sizing:border-box;word-wrap:break-word}html body>:first-child{margin-top:0}html body h1,html body h2,html body h3,html body h4,html body h5,html body h6{line-height:1.2;margin-top:1em;margin-bottom:16px;color:#000}html body h1{font-size:2.25em;font-weight:300;padding-bottom:.3em}html body h2{font-size:1.75em;font-weight:400;padding-bottom:.3em}html body h3{font-size:1.5em;font-weight:500}html body h4{font-size:1.25em;font-weight:600}html body h5{font-size:1.1em;font-weight:600}html body h6{font-size:1em;font-weight:600}html body h1,html body h2,html body h3,html body h4,html body h5{font-weight:600}html body h5{font-size:1em}html body h6{color:#5c5c5c}html body strong{color:#000}html body del{color:#5c5c5c}html body a:not([href]){color:inherit;text-decoration:none}html body a{color:#08c;text-decoration:none}html body a:hover{color:#00a3f5;text-decoration:none}html body img{max-width:100%}html body>p{margin-top:0;margin-bottom:16px;word-wrap:break-word}html body>ol,html body>ul{margin-bottom:16px}html body ol,html body ul{padding-left:2em}html body ol.no-list,html body ul.no-list{padding:0;list-style-type:none}html body ol ol,html body ol ul,html body ul ol,html body ul ul{margin-top:0;margin-bottom:0}html body li{margin-bottom:0}html body li.task-list-item{list-style:none}html body li>p{margin-top:0;margin-bottom:0}html body .task-list-item-checkbox{margin:0 .2em .25em -1.8em;vertical-align:middle}html body .task-list-item-checkbox:hover{cursor:pointer}html body blockquote{margin:16px 0;font-size:inherit;padding:0 15px;color:#5c5c5c;background-color:#f0f0f0;border-left:4px solid #d6d6d6}html body blockquote>:first-child{margin-top:0}html body blockquote>:last-child{margin-bottom:0}html body hr{height:4px;margin:32px 0;background-color:#d6d6d6;border:0 none}html body table{margin:10px 0 15px 0;border-collapse:collapse;border-spacing:0;display:block;width:100%;overflow:auto;word-break:normal;word-break:keep-all}html body table th{font-weight:700;color:#000}html body table td,html body table th{border:1px solid #d6d6d6;padding:6px 13px}html body dl{padding:0}html body dl dt{padding:0;margin-top:16px;font-size:1em;font-style:italic;font-weight:700}html body dl dd{padding:0 16px;margin-bottom:16px}html body code{font-family:Menlo,Monaco,Consolas,'Courier New',monospace;font-size:.85em;color:#000;background-color:#f0f0f0;border-radius:3px;padding:.2em 0}html body code::after,html body code::before{letter-spacing:-.2em;content:'\00a0'}html body pre>code{padding:0;margin:0;word-break:normal;white-space:pre;background:0 0;border:0}html body .highlight{margin-bottom:16px}html body .highlight pre,html body pre{padding:1em;overflow:auto;line-height:1.45;border:#d6d6d6;border-radius:3px}html body .highlight pre{margin-bottom:0;word-break:normal}html body pre code,html body pre tt{display:inline;max-width:initial;padding:0;margin:0;overflow:initial;line-height:inherit;word-wrap:normal;background-color:transparent;border:0}html body pre code:after,html body pre code:before,html body pre tt:after,html body pre tt:before{content:normal}html body blockquote,html body dl,html body ol,html body p,html body pre,html body ul{margin-top:0;margin-bottom:16px}html body kbd{color:#000;border:1px solid #d6d6d6;border-bottom:2px solid #c7c7c7;padding:2px 4px;background-color:#f0f0f0;border-radius:3px}@media print{html body{background-color:#fff}html body h1,html body h2,html body h3,html body h4,html body h5,html body h6{color:#000;page-break-after:avoid}html body blockquote{color:#5c5c5c}html body pre{page-break-inside:avoid}html body table{display:table}html body img{display:block;max-width:100%;max-height:100%}html body code,html body pre{word-wrap:break-word;white-space:pre}}.markdown-preview{width:100%;height:100%;box-sizing:border-box}.markdown-preview ul{list-style:disc}.markdown-preview ul ul{list-style:circle}.markdown-preview ul ul ul{list-style:square}.markdown-preview ol{list-style:decimal}.markdown-preview ol ol,.markdown-preview ul ol{list-style-type:lower-roman}.markdown-preview ol ol ol,.markdown-preview ol ul ol,.markdown-preview ul ol ol,.markdown-preview ul ul ol{list-style-type:lower-alpha}.markdown-preview .newpage,.markdown-preview .pagebreak{page-break-before:always}.markdown-preview pre.line-numbers{position:relative;padding-left:3.8em;counter-reset:linenumber}.markdown-preview pre.line-numbers>code{position:relative}.markdown-preview pre.line-numbers .line-numbers-rows{position:absolute;pointer-events:none;top:1em;font-size:100%;left:0;width:3em;letter-spacing:-1px;border-right:1px solid #999;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none}.markdown-preview pre.line-numbers .line-numbers-rows>span{pointer-events:none;display:block;counter-increment:linenumber}.markdown-preview pre.line-numbers .line-numbers-rows>span:before{content:counter(linenumber);color:#999;display:block;padding-right:.8em;text-align:right}.markdown-preview .mathjax-exps .MathJax_Display{text-align:center!important}.markdown-preview:not([data-for=preview]) .code-chunk .code-chunk-btn-group{display:none}.markdown-preview:not([data-for=preview]) .code-chunk .status{display:none}.markdown-preview:not([data-for=preview]) .code-chunk .output-div{margin-bottom:16px}.markdown-preview .md-toc{padding:0}.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link{display:inline;padding:.25rem 0}.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link div,.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link p{display:inline}.markdown-preview .md-toc .md-toc-link-wrapper.highlighted .md-toc-link{font-weight:800}.scrollbar-style::-webkit-scrollbar{width:8px}.scrollbar-style::-webkit-scrollbar-track{border-radius:10px;background-color:transparent}.scrollbar-style::-webkit-scrollbar-thumb{border-radius:5px;background-color:rgba(150,150,150,.66);border:4px solid rgba(150,150,150,.66);background-clip:content-box}html body[for=html-export]:not([data-presentation-mode]){position:relative;width:100%;height:100%;top:0;left:0;margin:0;padding:0;overflow:auto}html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{position:relative;top:0;min-height:100vh}@media screen and (min-width:914px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{padding:2em calc(50% - 457px + 2em)}}@media screen and (max-width:914px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{padding:2em}}@media screen and (max-width:450px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{font-size:14px!important;padding:1em}}@media print{html body[for=html-export]:not([data-presentation-mode]) #sidebar-toc-btn{display:none}}html body[for=html-export]:not([data-presentation-mode]) #sidebar-toc-btn{position:fixed;bottom:8px;left:8px;font-size:28px;cursor:pointer;color:inherit;z-index:99;width:32px;text-align:center;opacity:.4}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] #sidebar-toc-btn{opacity:1}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc{position:fixed;top:0;left:0;width:300px;height:100%;padding:32px 0 48px 0;font-size:14px;box-shadow:0 0 4px rgba(150,150,150,.33);box-sizing:border-box;overflow:auto;background-color:inherit}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar{width:8px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar-track{border-radius:10px;background-color:transparent}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar-thumb{border-radius:5px;background-color:rgba(150,150,150,.66);border:4px solid rgba(150,150,150,.66);background-clip:content-box}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc a{text-decoration:none}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc{padding:0 16px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link{display:inline;padding:.25rem 0}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link div,html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link p{display:inline}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper.highlighted .md-toc-link{font-weight:800}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{left:300px;width:calc(100% - 300px);padding:2em calc(50% - 457px - 300px / 2);margin:0;box-sizing:border-box}@media screen and (max-width:1274px){html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{padding:2em}}@media screen and (max-width:450px){html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{width:100%}}html body[for=html-export]:not([data-presentation-mode]):not([html-show-sidebar-toc]) .markdown-preview{left:50%;transform:translateX(-50%)}html body[for=html-export]:not([data-presentation-mode]):not([html-show-sidebar-toc]) .md-sidebar-toc{display:none}
-/* Please visit the URL below for more information: */
-/*   https://shd101wyy.github.io/markdown-preview-enhanced/#/customize-css */
-
-      </style>
-      <!-- The content below will be included at the end of the <head> element. --><script type="text/javascript">
-  document.addEventListener("DOMContentLoaded", function () {
-    // your code here
-  });
-</script></head><body for="html-export">
-    
-    
-      <div class="crossnote markdown-preview  ">
-      
-<h1 id="-water-redstart-the-chirping-viewer-v21-双平台版---极速鸟类照片挑选小助手">🐦 Water-redstart: the chirping viewer v2.1 (双平台版) - 极速鸟类照片挑选小助手 </h1>
-<h2 id="-windows-使用说明">🪟 Windows 使用说明 </h2>
-<p>本程序为封装好的单文件应用程序，<strong>无需安装任何环境，直接将 <code>Water-redstart_v2.1.exe</code> 复制或移动到你的照片文件夹内，双击运行即可开始挑图！</strong></p>
-<hr>
-<h2 id="-macos-小白一键运行指南">🍎 macOS 小白一键运行指南 </h2>
-<p>由于本程序现已全面支持 Windows / macOS 双平台运行，对于不熟悉终端操作的 macOS 电脑小白用户，您可以通过以下方式轻松制作一个“双击即用”的脚本：</p>
-<ol>
-<li>在本程序所在文件夹中，新建一个纯文本文件，命名为 <code>启动看鸟.command</code>（注意后缀名是 <code>.command</code>）。</li>
-<li>使用普通的文本编辑器（如 Mac 自带的文本编辑）将其打开，将以下代码完整复制并粘贴进去，然后保存：</li>
-</ol>
-<pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token shebang important">#!/bin/bash</span>
-<span class="token builtin class-name">cd</span> <span class="token string">"<span class="token variable"><span class="token variable">$(</span><span class="token function">dirname</span> <span class="token string">"<span class="token variable">$0</span>"</span><span class="token variable">)</span></span>"</span>
-pip3 <span class="token function">install</span> pillow rawpy
-python3 photo_viewer.py
-</code></pre><ol start="3">
-<li><strong>首次权限激活（仅需一次）</strong>：<br>
-打开 Mac 的“终端（Terminal）”，输入 <code>chmod +x </code>（注意 <code>+x</code> 后面必须保留一个空格），然后直接将刚才创建的 <code>启动看鸟.command</code> 文件用鼠标拖到终端窗口里，按下回车即可。</li>
-</ol>
-<p>完成以上步骤后，以后每次在 Mac 上看图只需 <strong>双击 <code>启动看鸟.command</code></strong> 就能直接打开软件啦！</p>
-<hr>
-<h2 id="-软件简介">✨ 软件简介 </h2>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Water-redstart v4.0 使用说明</title><style>
+@page {
+  size: A4; margin: 15mm 16mm 17mm;
+  @bottom-right { content: counter(page); font: 9pt "Segoe UI", sans-serif; color: #667; }
+}
+* { box-sizing: border-box; }
+body {
+  max-width: 980px; margin: 0 auto; padding: 32px;
+  color: #25343a; background: white;
+  font: 15px/1.7 "Segoe UI", "Microsoft YaHei", "Segoe UI Emoji", sans-serif;
+  overflow-wrap: anywhere;
+}
+h1, h2, h3 { color: #164e63; line-height: 1.4; break-after: avoid; }
+h1 { font-size: 28px; margin: 0 0 24px; }
+h2 { font-size: 21px; margin: 26px 0 12px; border-bottom: 1px solid #cddce1; padding-bottom: 6px; }
+h3 { font-size: 17px; margin: 18px 0 8px; }
+p, ul, ol { margin: 0 0 12px; }
+ul, ol { padding-left: 1.6em; }
+li { margin-bottom: 5px; }
+li > p { margin-bottom: 4px; }
+a { color: #126782; text-decoration: none; }
+code { font-family: Consolas, "Microsoft YaHei", monospace; font-size: .9em; background: #f0f5f6; padding: 1px 3px; }
+pre { padding: 12px; background: #f0f5f6; white-space: pre-wrap; }
+blockquote { margin: 16px 0; padding: 12px 16px; border-left: 3px solid #4d8d8b; background: #f0f7f6; }
+blockquote p:last-child { margin-bottom: 0; }
+hr { border: 0; border-top: 1px solid #dbe4e7; margin: 22px 0; }
+@media print {
+  body { padding: 0; max-width: none; font-size: 10pt; line-height: 1.65; }
+  h1 { font-size: 20pt; margin-bottom: 16px; }
+  h2 { font-size: 14pt; margin-top: 18px; }
+  h3 { font-size: 11.5pt; }
+  p, li { orphans: 2; widows: 2; }
+  li { break-inside: avoid; }
+  blockquote, pre { break-inside: avoid; }
+  a { color: inherit; }
+}
+</style></head><body>
+<h1>🐦 Water-redstart: the chirping viewer v4.0 (双平台版) - 极速鸟类照片挑选小助手</h1>
+<h2>🪟 Windows 使用说明</h2>
+<p>本次 Windows 单文件发行包为 <strong><code>v4.0.exe</code></strong>，使用 <code>bird.ico</code> 红尾水鸲图标。无需安装 Python，双击即可运行，通过 <code>文件 → 打开照片文件夹...</code> 选择图库。线上发布包请以 <a href="https://github.com/Crowheart0/Water-redstart_the_chirping_viewer/releases/latest">GitHub Releases</a> 的实际附件为准。</p>
+<h3>先确认目标，再选择保存格式（v4.0 新增）</h3>
+<ul>
+<li>打开含照片的图库后会主动弹出 <strong>“选择选片目标文件夹”</strong>；若软件启动目录本身有照片，也会提示。默认保存到<strong>待选文件夹内的 <code>SELECT</code> 子文件夹</strong>，不会直接写回原片目录。</li>
+<li>点击 <strong>“使用 SELECT”</strong> 确认默认位置，或 <strong>“选择其他文件夹…”</strong> 更换目标；目录选择器从待选文件夹打开。关闭弹窗或按 Esc 采用默认 SELECT。取消目录选择则保留确认弹窗。</li>
+<li>遇到同名 <strong>RAW+JPEG</strong> 时，顶部出现 <strong>“保存 RAW” / “保存 JPEG”</strong> 两个勾选项，默认都勾选，可只保留一种。选择在翻页、撤销和切换单格式照片时不会重置，并随该图库配置保存。</li>
+<li>两项都未勾选时按挑出键会提示，<strong>不保存、不翻页</strong>。单格式照片不显示这组控件，仍正常保存；同名组内若还有 PNG 等其他格式，仍随组保存。勾选只影响挑出文件，不改变预览、原片或剪贴板行为。</li>
+<li>后续每次打开图库都会重新确认目标、默认 SELECT；选片过程中仍可从“设置 → 修改操作热键与文件夹...”调整目标。</li>
+</ul>
+<h3>选片空间预警与保存确认（v4.0 新增）</h3>
+<ul>
+<li>按 <strong>W / ↑</strong> 挑出时，后台先计算本次勾选文件的整组容量，检查<strong>目标文件夹所在磁盘</strong>的可用空间；绝对路径、外接盘及默认 <code>SELECT</code> 子文件夹均适用。仅保存 RAW 或 JPEG 时，只计入实际需要复制的格式。</li>
+<li>空间不足时立即弹窗说明目标路径、所需容量和当前可用容量，<strong>停留在当前照片，不记为已选、不播放成功音效</strong>。释放空间，或在“设置 → 修改操作热键与文件夹...”中更换目标后，重新按挑出键即可。</li>
+<li>复制途中遇到磁盘写满、权限问题或磁盘断开，同样会弹窗；回退本次创建的文件，保留原片。若设备不可用导致残留文件无法删除，提示会列出需要检查的路径。</li>
+<li><strong>整组复制成功后才播放鸟鸣、写入撤销记录并翻页</strong>。复制期间仍可查看、缩放当前照片；暂缓重复选片、翻页、切换目录、撤销及退出，避免尚未保存就继续筛选或清理原片。</li>
+<li>成功保存后若剩余空间低于 <strong>256 MiB</strong>，提前提醒“空间即将不足”；同一目标在这段低空间期间只提醒一次，每次选片仍独立检查实际容量。</li>
+<li>目标中已有内容相同的文件会跳过，撤销只删除本次新复制的文件；同名但内容不同则提示更换目标，保留原有文件。</li>
+</ul>
+<p>容量预检不能预知其他程序同时占用磁盘、文件系统配额或设备故障，因此实际复制结果始终是保存成功的判断依据。请勿在保存过程中强制结束进程或拔出存储设备。</p>
+<h3>RAW 显示和流畅缩放</h3>
+<ul>
+<li>Windows 默认使用已安装的系统 WIC RAW 编解码器；“设置 → RAW 显示方式”可切换为相机内嵌预览。缺少编解码器时自动回退，并在标题栏显示。相机预览与系统 RAW 的画面可能不同，不能保证复现 Windows 照片的 HDR 或应用自身处理。</li>
+<li>处理照片 ICC、明确标记的 Adobe RGB 和 Windows 默认显示器 ICC。多显示器切换及用户 NEF 的最终颜色仍需实机对照验证。</li>
+<li>翻页先显示最长边 1600 像素的预览，放大时后台读取所选画质的细节并保持查看位置；3 个固定后台线程按最新位置优先预读，缓存按内存大小限制为 256 MiB（省内存模式 96 MiB）。Super 模式保留较大的预读窗口。</li>
+<li>无损系统 RAW 预览缓存在临时目录的 <code>WaterRedstart/preview-v2</code> 中（约 1 GiB 上限）；源文件或显示配置变化后重新解码。首次 RAW 解码仍可能等待，缓存预算不等于程序总内存。</li>
+<li>多级缩小图减少大图重复缩放，连续滚轮、触控板和拖动事件合并为约 16ms 一次绘制。Windows 鼠标及 macOS 高精度触控板入口保留。</li>
+</ul>
+<p>测试：<code>python -B -m unittest -v test_photo_viewer</code> 与 <code>python -B -m unittest discover -s tests -v</code>。测试覆盖空间不足、中途写满、复制确认与撤销、目标确认弹窗、格式勾选与跨帧记忆、音效回退、系统解码、色彩、缓存失效、线程取消、分级绘制、指针定位和真实 Tk 窗口交互。</p>
+<hr />
+<h2>🍎 macOS 使用说明</h2>
+<p>从 <a href="https://github.com/Crowheart0/Water-redstart_the_chirping_viewer/releases/latest">GitHub Releases</a> 下载与 Mac 匹配的压缩包。工作流按版本号命名，例如 v4.0 对应：</p>
+<ul>
+<li>Apple Silicon（M1/M2/M3/M4 等）：<code>Water-redstart_v4.0_macos_arm64.zip</code></li>
+<li>Intel Mac：<code>Water-redstart_v4.0_macos_x64.zip</code></li>
+</ul>
+<p>本次本地交付为 Windows EXE；上述 macOS 包需由现有跨平台工作流生成，下载时请以实际发布附件为准。</p>
+<p>下载后双击 ZIP 解压，把 <code>Water-redstart.app</code> 拖入“应用程序”文件夹即可。当前自动构建使用 ad-hoc 签名；首次打开如被 macOS 拦截，请按住 Control 点击应用图标，选择“打开”。</p>
+<blockquote>
+<p>正式无提示分发仍需要 Apple Developer ID 签名与 notarization；详见 <a href="../docs/RELEASING.md"><code>docs/RELEASING.md</code></a>。</p>
+</blockquote>
+<hr />
+<h2>✨ 软件简介</h2>
 <p>Water-redstart 是专为摄影师、观鸟记录者以及需要从海量照片中<strong>快速筛选出图</strong>的用户打造的一款<strong>本地极速看图工具</strong>。</p>
 <p>告别缓慢的文件夹拖拽和繁琐的复制粘贴操作，通过 Water-redstart: the chirping viewer，你只需使用键盘热键进行“快准狠”的二元判断（跳过或挑出），即可用极高效率梳理成百上千张单反照片。它被设计得轻量、活泼且极度流畅。</p>
-<hr>
-<h2 id="-核心功能亮点">🚀 核心功能亮点 </h2>
-<h3 id="1-极致交互全键盘沉浸式筛选">1. 极致交互：全键盘沉浸式筛选 </h3>
+<hr />
+<h2>🚀 核心功能亮点</h2>
+<h3>1. 极致交互：全键盘沉浸式筛选</h3>
 <ul>
-<li><strong>[D] 下一张</strong>：这张一般般，跳过！</li>
-<li><strong>[W] 挑出</strong>：这张很棒！一键触发清脆的“叽叽”鸟鸣音效，自动将当前源文件安全复制到选中的独立子文件夹，毫不拖泥带水。</li>
-<li><strong>[S] 复制到剪贴板</strong>：看到一张想分享的高光时刻？直接将源文件路径放入系统剪切板（彻底解决大分辨率照片复制后提及膨胀变数百兆的问题），随时完美无损地粘贴到微信或文档中。</li>
+<li><strong>[←] 左键</strong>：回到上一张照片。</li>
+<li><strong>[→] 右键 / [D]键</strong>：这张一般般，跳过下一张！</li>
+<li><strong>[↑] 上键 / [W]键</strong>：后台检查空间并按 RAW/JPEG 勾选复制本组源文件到选片目标；整组保存成功后播放“叽叽”鸟鸣并翻页，失败时弹窗并停留当前照片。</li>
+<li><strong>[↓] 下键 / [S]键</strong>：看到一张想分享的高光时刻？直接将源文件路径放入系统剪切板（彻底解决大分辨率照片复制后体积膨胀变数百兆的问题），随时完美无损地粘贴到微信或文档中。</li>
 <li><strong>[A] 自动撤销</strong>：手滑了？别着急，按下撤销键，自动退回上一张。如果是“挑出”手滑，程序会自动跟进帮你把刚才放进子文件夹里的废片删干净（放飞小鸟）。</li>
+<li><strong>[Space] 中心放大</strong>：按住空格键开启相机般的“中心区域放大对焦”，松开自动完美复原到你之前的缩放和平移进度。（这颗按键现在也加入了自定义豪华大礼包！）</li>
+<li><strong>[I] 图片属性</strong>：按下 I 键即可查看当前照片的详细身份信息（文件名、路径、尺寸、格式、大小、修改时间）。如果有 JPG+RAW 同名文件组，会自动弹出可爱的选择框让你挑选想查看哪一张~ （此按键同样支持自定义修改！）</li>
 <li><strong>顶端灵动进度条</strong>：上方自带可视化进度条，使用鼠标拖动它就可以在全盘大跨度照片中进行快进和翻页！</li>
 <li><strong>灵活的倒序审图</strong>：开启设置里的“倒序选片”，系统将一秒自动头尾翻转，方便您顺着刚刚拍摄完成的最新照片一直往前看！</li>
-<li><em>以上所有热键均可随时进入设置面板修改为您习惯的顺手按键，哪怕是方向键也同样支持哟！</em></li>
+<li><em>以上所有热键（包含所有上下左右方向类与功能类热键）均可随时进入设置面板修改为您习惯的顺手按键！</em></li>
 </ul>
-<h3 id="2--raw巨型原图极速翻页体验">2. ⚡ RAW/巨型原图极速翻页体验 </h3>
+<h3>2. ⚡ RAW/巨型原图极速翻页体验</h3>
 <p>告别每翻一张 30MB 的原图就要卡顿转圈的噩梦！</p>
 <ul>
-<li><strong>全面支持更多 RAW 格式</strong>：本版本新增支持 <code>.naw</code> 与 <code>.nrw</code> 格式文件，满足更多型号相机的看图需求。</li>
-<li><strong>重构的底层极速通道</strong>：通过拦截并使用底层 C 库在图片读取阶段完成分辨率的降采样解码，使得巨型文件占用内存减半且画质锐利不降，体验飞升。</li>
-<li><strong>后台多线程深度预读</strong>：它像个聪明的小管家，在你看眼下这张时，它在后台已将后多达<strong>五十张</strong>照片悄悄放入内存缓存。每一次按键翻页都是“秒切”，哪怕以“一拍三张”的节奏盲开连按，也绝不会有一丝卡顿。</li>
+<li><strong>多厂商 RAW 格式</strong>：支持 <code>.arw</code>、<code>.sr2</code>、<code>.srf</code>、<code>.crw</code>、<code>.cr2</code>、<code>.cr3</code>、<code>.nef</code>、<code>.nrw</code>、<code>.dng</code>、<code>.orf</code>、<code>.rw2</code>、<code>.raf</code>、<code>.pef</code>；实际解码兼容性取决于系统编解码器和 LibRaw 对相机型号的支持。</li>
+<li><strong>预览与细节分开加载</strong>：先后台读取最长边 1600px 的预览，放大时再读取所选画质细节；原图未达到该分辨率时不会凭空增加细节。</li>
+<li><strong>固定后台线程预读</strong>：3 个预览线程优先处理最新请求，另有细节读取线程；拒收旧目录、旧画质结果，缓存按字节限制为 <strong>256 MiB</strong>（省内存模式 <strong>96 MiB</strong>）。普通模式向前预读窗口 <strong>12 张</strong>、省内存模式 <strong>4 张</strong>；Super 模式启动 <strong>24 张</strong>、之后 <strong>16 张</strong>，实际缓存数量受容量预算限制。</li>
+<li><strong>高速连翻合并</strong>：单次翻页立即提交后台加载；按住方向键连发时，导航合并间隔约 120 ms，跳过来不及显示的中间页，减少无效解码和外接盘 I/O。</li>
 </ul>
-<h3 id="3-️-沉浸式拖拽放大">3. 🖱️ 沉浸式拖拽放大 </h3>
+<h3>3. 🖱️ 沉浸式拖拽放大</h3>
 <ul>
 <li><strong>鼠标滚轮局部缩放</strong>：看鸟当然要数毛！使用鼠标滚轮可随心所欲悬停放大照片局部的细节。</li>
 <li><strong>左键平滑拖拽</strong>：放大后支持鼠标左键按住拖动自由平移，享受顺滑细节审视体验！</li>
+<li><strong>macOS 精细触控板</strong>：兼容 Tk 9 高精度滚动及旧版滚轮入口；缩放保持鼠标指针锚点，高清细节加载完成后保留当前视图。</li>
+<li><strong>分级绘制</strong>：后台生成缩小层级，只处理当前视口，连续滚轮、触控板及拖动事件合并绘制并复用画布项。</li>
 </ul>
-<h3 id="4--智控文件夹与善后清理">4. 📂 智控文件夹与善后清理 </h3>
+<h3>4. 📂 智控文件夹与善后清理</h3>
 <ul>
-<li><strong>智能记忆读图进度</strong>：不想下次从大分类的第一张重看？不慌！软件带有每次随用随保存的功能，下一次打开它会在上次结束的地方等着您。</li>
+<li><strong>智能记忆读图进度</strong>：不想下次从大分类的第一张重看？不慌！软件会在停止翻页 500 ms 后合并保存最新进度，退出时也会立即保存。</li>
 <li><strong>贴心多功能结尾向导</strong>：当你梳理完该目录下最后一张照片，程序会立刻为你颁发“小红花”，并直接弹出快捷处理面板：你可以选择一键无痕抹除已经挑废了的整个文件夹原片，甚至还可以让老版本看图程序上演“大义灭亲”——顺手把自己也删除得干干净净。</li>
+<li><strong>省内存模式 (v2.3新增)</strong>：在设置菜单中开启时，向前预读数量从 12 张下降到 4 张，特别适合配置压力较大的老电脑或巨型 RAW 照片库。</li>
 </ul>
-<hr>
-<h2 id="-外观与个性化">🎨 外观与个性化 </h2>
+<h3>5. 🎵 自定义选片成功音效（v4.0 新增）</h3>
+<ul>
+<li>菜单栏最右侧、<strong>“帮助”之后</strong>新增 <strong>“音效”</strong> 菜单，不改变原有菜单、快捷键和选片操作。</li>
+<li>点击 <strong>“选择选片成功音效 (WAV)...”</strong> 选择本地 <strong>PCM WAV</strong> 文件；可 <strong>“试听当前音效”</strong>，或 <strong>“恢复默认音效”</strong>。建议使用简短的鸟鸣或提示音。</li>
+<li>设置全局记忆，切换图库和重新启动后继续使用。音频文件仍从原路径读取，请保留它；移动、删除或无法播放时自动回退默认音效。</li>
+<li>只替换 <strong>W / ↑ 挑出成功</strong> 的提示音，失败时不播放成功音效。播放和默认鸟鸣均异步执行，不等待音频结束再翻页；改变音效不会重建其他菜单或重置画质、倒序、省内存设置。</li>
+</ul>
+<hr />
+<h2>🔧 [v4.0] 更新日志</h2>
+<ol>
+<li><strong>新增：选片空间预警</strong>。按实际勾选格式进行整组容量预检；剩余空间低于 256 MiB 时提前提醒。复制失败可见、可重试，成功后才确认选片并翻页，失败回退本次新建文件。</li>
+<li><strong>修复：Windows RAW 色彩与显示</strong>（感谢 <strong>Mr.Nobody</strong>）。默认使用 WIC RAW 编解码器，可切换相机内嵌预览；系统解码不可用时回退并在标题栏注明。处理嵌入 ICC、明确标记的 Adobe RGB 和默认显示器 ICC，区分 JPEG/数组缩略图，缺少预览时使用相机白平衡回退。</li>
+<li><strong>优化：后台加载、缓存与缩放</strong>（感谢 <strong>Mr.Nobody</strong>）。1600px 预览优先、放大再加载细节；固定线程优先处理最新请求，拒收旧目录/旧画质结果；按字节限制内存缓存，系统 RAW 预览无损缓存到临时目录；分级视口绘制、事件合并和画布项复用，保持指针锚点及查看位置。</li>
+<li><strong>整合：v3.6.0 双平台修复</strong>（感谢 <strong>绿羊</strong>）。保留 macOS 高精度触控板入口、Tk 主线程隔离、导航合并、进度写入合并、元数据读取和按系统/架构选择更新包的能力。</li>
+<li><strong>致谢与发行</strong>：软件“帮助 → 关于”和 README 加入 <strong>绿羊、Mr.Nobody</strong>；Windows 发行包为使用 <code>bird.ico</code> 的 <code>v4.0.exe</code>。</li>
+<li><strong>新增：自定义音效</strong>。菜单栏最后追加“音效”，支持 PCM WAV 选择、试听、恢复默认和全局记忆；选片成功音效异步播放，异常自动回退。</li>
+<li><strong>新增：目标文件夹主动确认</strong>。打开图库后弹窗询问保存位置，默认图库内的 SELECT，选择其他位置时从当前图库打开目录选择器。</li>
+<li><strong>新增：RAW/JPEG 分别保存</strong>。同名配对组显示两项勾选，默认全选、支持只存一种，翻页保留状态并记入图库配置；空选时提示且不翻页。</li>
+</ol>
+<h3>性能记录与已知限制</h3>
+<p>Mr.Nobody 的提交记录报告：同一张 8K 图片在 1200×900 视口中，纯缩放处理约由 80 ms 降至 15 ms，局部视口约由 40 ms 降至 16 ms；不含 Tk 图像上传与刷新。一张官方 NEF 样片首次系统解码约 0.71 秒，已有磁盘预览时约 15 ms。<strong>这些是贡献者本机样片结果，未作为本次发行的统一性能承诺。</strong></p>
+<p>特定用户 NEF 尚未完成对照验证，不能保证复现 Windows 照片的 HDR 或应用自身处理；跨显示器移动窗口时不会动态切换 ICC；macOS 未在本次 Windows 本地发行中实机验证。首次 RAW 解码仍可能等待，内存缓存预算也不等于应用总内存。</p>
+<h2>🔧 [v3.6.0] 更新日志</h2>
+<p>以下保留历史版本行为；v4.0 的复制确认、目标提示、格式勾选与多线程缓存机制以本文前述说明为准。感谢 <strong>绿羊（greenEggLy）</strong> 对 macOS、线程隔离和双平台发布的贡献。</p>
+<ol>
+<li><strong>修复</strong>：macOS 后台预读不再访问任何 Tk 变量，避免快速翻页时触发 Tcl/Tk 原生层崩溃。</li>
+<li><strong>优化</strong>：预读改为可取消的单 worker，缩小缓存窗口；高速翻页合并渲染，进度配置延迟合并写入。</li>
+<li><strong>新增</strong>：GitHub Actions 同时构建 Windows x64、Apple Silicon macOS 和 Intel macOS 安装包。</li>
+<li><strong>修复</strong>：更新检查按操作系统和 CPU 架构选择正确安装包；macOS 更新下载到“下载”文件夹，不修改正在运行的应用包。</li>
+<li><strong>修复</strong>：兼容 Tk 9 的 macOS 触控板精细滚动事件，并保留传统鼠标滚轮与 Linux 滚轮按钮缩放。</li>
+</ol>
+<h2>🔧 [v3.5] 更新日志</h2>
+<ol>
+<li><strong>修复</strong>：快门速度、光圈、焦距在属性卡片中不显示的问题。PIL 返回的 EXIF 相机参数为 <code>IFDRational</code> 类型，改用 <code>float()</code> 转换后正确格式化（<code>1/1000s</code>、<code>f/5.6</code>、<code>500mm</code>）。</li>
+<li><strong>修复</strong>：EXIF 读取覆盖主 IFD 和子 IFD（<code>0x8769</code>），确保 Sony/Canon/Nikon 等相机参数完整提取。</li>
+<li><strong>优化</strong>：RAW 文件缩略图回退逻辑增强 —— 任一 EXIF 字段缺失（ISO/快门/光圈/焦距）均触发 rawpy 补全，所有厂商 RAW 格式均可正确显示相机参数。</li>
+<li><strong>优化</strong>：属性对话框高度从 550 增至 620，完整展示 ISO/快门/光圈/焦距。</li>
+</ol>
+<h2>🔧 [v3.4] 更新日志</h2>
+<ol>
+<li><strong>修复</strong>：全面审查并替换 Win10 不兼容的鸟巢、身份卡等 emoji，改善 Windows 10 上的图标显示。</li>
+<li><strong>新增</strong>：Super 连拍模式启动时顶栏显示加载提示「🚀 Super 连拍模式启动中，小鸟正在预加载 100 张照片...」。</li>
+<li><strong>新增</strong>：致谢名单加入 YIP。</li>
+</ol>
+<h2>🔧 [v3.3] 更新日志</h2>
+<ol>
+<li><strong>新增</strong>：🚀 Super 连拍模式。设置中开启后，启动时预加载 100 张，翻页时预加载 85 张，专为连拍用户优化。配置自动保存。</li>
+<li><strong>新增</strong>：图片属性卡片新增 ISO、快门速度、光圈、焦距信息。</li>
+<li><strong>修复</strong>：顶栏快捷键指引使用纯文本符号（<code>&gt;&gt; * &lt;&lt; [c] ~ [i]</code>）替代 Win10 不兼容的 emoji。</li>
+<li><strong>新增</strong>：更新提示增加「🔕 忽略此次更新」选项（二次确认，写入配置持久化）。</li>
+<li><strong>优化</strong>：启动后台静默检查更新，菜单 <code>帮助 → 🕊️ 检查更新...</code> 可手动触发。</li>
+</ol>
+<h2>🔧 [v3.2] 更新日志</h2>
+<ol>
+<li><strong>修复</strong>：RAW 文件属性查看现已正确读取 EXIF 拍摄时间和图片尺寸（通过 rawpy JPEG 缩略图回退）。</li>
+<li><strong>新增</strong>：自动更新检查（菜单 + 启动静默检查，4 选项更新对话框：下载 / 浏览器查看 / 下次再说 / 忽略）。</li>
+<li><strong>优化</strong>：选出键（W/↑）按下瞬间即刻播放音效，不再等待后台复制完成。</li>
+<li><strong>修复</strong>：热键修改对话框保存失效（<code>update_top_info</code>→<code>update_title</code>）+ 属性对话框文字可选中复制（Entry/Text）。</li>
+<li><strong>新增</strong>：属性卡片 📋 一键复制拍摄时间（含成功/失败动画）+ 窗口加宽至 1050×750。</li>
+<li><strong>新增</strong>：鸣谢名单加入 GPT-5.5、DeepSeek-V4-Pro。</li>
+</ol>
+<h2>🔧 [v3.1] 更新日志</h2>
+<ol>
+<li><strong>新增</strong>：按下 I 键即可查看当前照片的详细属性信息卡（文件名、完整路径、图片尺寸、格式类型、文件大小、修改时间），并伴有清脆的音效反馈。</li>
+<li><strong>新增</strong>：当检测到同名 JPG+RAW 文件组时，按下 I 键会弹出温馨可爱的选择对话框，列出所有关联格式及其文件大小，点击即可查看对应照片的身份信息。</li>
+<li><strong>新增</strong>：I 键已完整接入自定义热键系统，你可以在"设置 → 修改操作热键与文件夹"面板中自由更改属性查看快捷键。</li>
+<li><strong>优化</strong>：顶栏动态快捷键指引区域已加入属性热键提示（🪪 属性），操作一览更全面。</li>
+</ol>
+<h2>🔧 [v3.0] 更新日志</h2>
+<ol>
+<li><strong>新增</strong>：顶栏区域全新升级！在程序的顶栏动态增加上下左右全部按键的操作指引，并且会自动显示当前打开文件夹的名字，全局状态一目了然。</li>
+<li><strong>新增</strong>：支持全局记忆最后一次打开的目录。巢穴边有一只手绘的小鸟，点击它即可一秒带你无缝回到上次打开的图库。</li>
+<li><strong>新增</strong>：按住放大画面的核心按键（原默认 Space）现已完全开放自定义。你可以在热键设置面板随时把它改写成你喜欢的控制键。</li>
+</ol>
+<h2>🔧 [v2.9] 更新日志</h2>
+<ol>
+<li><strong>新增</strong>：模拟相机的“中心区域放大对焦”画面效果。按住指定的快捷键画面将自动放大至中心区域，松开自动还原。</li>
+<li><strong>新增</strong>：放大时会自动施加微弱锐化。采用原始宽高同比率无缝裁切方案，保障放大时的画面不畸变不出黑边。</li>
+<li><strong>优化</strong>：空文件夹引导页升级：如果拖入的文件夹没有照片但包含子文件夹（树枝），则提供优雅的列表供您直接穿越到含照片的目录，避免误报“孵化失败”退回原点。</li>
+</ol>
+<h2>🔧 [v2.8] 更新日志</h2>
+<ol>
+<li><strong>新增</strong>：加入了当无可显示的图片时的引导欢迎页，支持原生拖拽文件夹直接开启看图选图（现已加入 windnd 支持）。</li>
+<li><strong>新增</strong>：支持同名多格式文件（如 JPG+RAW）重叠显示与处理功能。优先展示 JPG 以加速预览，挑出时自动一并打包所有同名格式文件，复制剪贴板时则仅复制 JPG；且状态栏会有相应重叠显示提示，一切尽在后台快速完成。</li>
+</ol>
+<h2>🔧 [v2.7] 更新日志</h2>
+<ol>
+<li><strong>新增</strong>：补全并全面囊括了各家相机厂商的 RAW 格式支持！除原有的格式外，最新版本现在完美支持索尼（<code>.arw</code>, <code>.sr2</code>, <code>.srf</code>）、佳能（<code>.crw</code>, <code>.cr2</code>, <code>.cr3</code>）、尼康（<code>.nef</code>, <code>.nrw</code>）、松下（<code>.rw2</code>）、奥林巴斯（<code>.orf</code>），以及富士（<code>.raf</code>）、宾得（<code>.pef</code>）和通用（<code>.dng</code>）格式照片！</li>
+<li><strong>新增</strong>：支持完全自定义挑出照片的目标文件夹！在“设置”菜单修改文件夹名的后方加入了“浏览”按钮，您可以自由选择电脑中的任意硬盘或路径作为集中收件箱。且该设定会自动随当前看图文件夹存档，换个文件夹重看仍然默认使用原来的“SELECT”。</li>
+<li><strong>优化</strong>：大幅提升了按下“挑选（W 键）”时的软件响应速度！现在选片复制文件的动作已完全放入后台多线程处理，对于巨大体积的 RAW 图片，按下快捷键即刻秒切下一张，再也不用卡顿等待文件复制完成了。</li>
+<li><strong>优化</strong>：在选完照片后若选择“删除本程序”，如果检测到当前程序未存放在该照片文件夹下，将会保留本程序，仅擦除该文件夹下的记忆配置文件，避免误删程序。</li>
+</ol>
+<h2>🔧 [v2.6] 更新日志</h2>
+<ol>
+<li><strong>新增</strong>：新增键盘上下左右键的控制方式，可代替键盘的这四个默认控制键。下键能够快速分享照片的物理路径，这些方向功能也可以同其他几个热键槽位完全独立，在主界面的“修改操作热键与文件夹”控制台中自行调配绑定与热键更替！</li>
+</ol>
+<h2>🔧 [v2.5] 更新日志</h2>
+<ol>
+<li><strong>新增</strong>：增加了照片显示画质调节功能（在“设置”菜单中），默认升级为极具震撼力的 <strong>8K 无损级别</strong> 检视体验，让“数毛”更加纤毫毕现。</li>
+<li><strong>优化</strong>：提供了 2K（运行快、省内存）、4K（平衡）选项以适应老旧电脑，且您的画质选择会自动保存，下次直接生效。</li>
+</ol>
+<h2>🔧 [v2.4] 更新日志</h2>
+<ol>
+<li><strong>新增</strong>：支持菜单栏“文件 - 打开照片文件夹...”，完美解决直接在U盘或外接存储卡中运行程序时可能爆发的内存读取权限报错。</li>
+<li><strong>新增</strong>：启动自动切换英文输入法功能，针对 Windows 系统，打开软件将自动向系统申请激活美式英语键盘模式，彻底根治中文输入法拦截选图快捷键的尴尬。</li>
+<li><strong>优化</strong>：画质呈现引擎大幅升级！针对鼠标滚轮无级放大的局部深视场景，程序底层的分辨率缓存阈值由 3000px 提标扩容至惊人的 6000px，并且增加了高阶双三次滤波与 Lanczos 锐利重构抗锯齿计算。现在，尽情拉满滚轮享受最丝滑的“数毛”吧！</li>
+<li><strong>新增</strong>：鸣谢名单加入白鹡鸰、灰喜鹊、碳酸。</li>
+</ol>
+<h2>🔧 [v2.3] 更新日志</h2>
+<ol>
+<li><strong>新增</strong>：在设置菜单中增加“全屏时保留上方菜单栏”开关，全屏沉浸看图还是保留进度信息可由您随心分配，且支持永久记忆。</li>
+<li><strong>新增</strong>：菜单内增加“省内存模式”选项，在小内存设备也可丝滑挑图。</li>
+<li><strong>修复</strong>：最后一张图多次点击“下一张”热键会导致弹窗重复弹出的逻辑错误。</li>
+<li><strong>新增</strong>：鸣谢名单加入瑞瑞的。</li>
+</ol>
+<hr />
+<h2>🎨 外观与个性化</h2>
 <ul>
 <li><strong>UI 色彩可调</strong>：觉得默认的橘粉色和淡黄色底色不搭当前心情？进入魔法设置，您可以使用调色盘将整个信息横幅任意改色！</li>
-<li><strong>界面呼吸感优化</strong>：顶部设置了 UI 字体缩放自适应尺寸控制拉杆，全屏观图时（按 <code>F11</code>）它不强夺眼球，确保鸟儿的美丽羽毛主宰屏幕。</li>
+<li><strong>界面呼吸感与全屏定制 (v2.3)</strong>：顶部设置了 UI 字体缩放自适应尺寸控制拉杆。全屏观图时（按 <code>F11</code>默认隐藏任务栏），它可以实现真正的全屏零干扰；同时你也可以在设置里勾选“全屏保留上方菜单栏”以在全屏看图时随时掌握当前看图进度！</li>
 <li><strong>红尾水鸲图标</strong>：拥有一枚萌动可爱的手绘红尾水鸲（蓝身子、黑嘴巴、橙色小尾巴）形象的专属图标，桌面存在感高。</li>
 </ul>
-<hr>
-<h2 id="-如何使用">📥 如何使用 </h2>
-<p>将编译好的独立 <code>Water-redstart_v2.1.exe</code> 放置在存放杂乱待选照片的随便哪个“图库夹”旁边，双击运行即可。</p>
-<p><strong>环境依赖：</strong><br>
-由于已封装为单文件应用程序（Exe），无需任何 Python 前置插件或繁重的看图器支持，开箱即用。</p>
+<hr />
+<h2>📥 如何使用</h2>
+<p>从 <a href="https://github.com/Crowheart0/Water-redstart_the_chirping_viewer/releases/latest">GitHub Releases</a> 下载对应平台安装包，解压或双击运行，再通过 <code>文件 → 打开照片文件夹...</code> 选择图库。</p>
+<p><strong>环境依赖：</strong>
+发布包已包含 Python、Pillow、rawpy 与平台运行库，无需另行安装依赖。</p>
 <blockquote>
-<p><em>Author: Crowpaw @ 2026</em><br>
-<em>鸣谢：ARC, Untribiium, ~ris, 蓝嘴红鹊, 鸥鹭风云，Gemini 3.1 Pro</em><br>
-于一</p>
+<p><em>Author: Crowpaw @ 2026</em></p>
+<p><em>鸣谢：ARC, Untribiium, ~ris, 蓝嘴红鹊, 鸥鹭风云, 瑞瑞的, 白鹡鸰, 灰喜鹊, 碳酸, 逢青, Gemini 3.1 Pro, GPT-5.5, DeepSeek-V4-Pro, YIP, 绿羊, Mr.Nobody</em></p>
+<p>于一</p>
 </blockquote>
-
-      </div>
-      
-      
-    
-    
-    
-    
-    
-    
-  </body></html>
+<p>特别感谢 <strong>绿羊（greenEggLy）</strong> 的 macOS 触控板与 v3.6.0 双平台改进，以及 <strong>Mr.Nobody（MrNobody2147483647）</strong> 的 Windows RAW 色彩、后台加载与流畅缩放优化。</p>
+<hr />
+<p><strong>仓库地址：</strong>
+<a href="https://github.com/Crowheart0/Water-redstart_the_chirping_viewer">https://github.com/Crowheart0/Water-redstart_the_chirping_viewer</a></p>
+</body></html>

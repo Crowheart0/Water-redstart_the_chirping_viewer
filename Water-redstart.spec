@@ -71,6 +71,29 @@ if is_macos:
         },
     )
 else:
+    from PyInstaller.utils.win32.versioninfo import (
+        VSVersionInfo, FixedFileInfo, StringFileInfo, StringTable, StringStruct,
+        VarFileInfo, VarStruct,
+    )
+    version_tuple = tuple(int(part) for part in app_version.split("."))
+    version_tuple = (version_tuple + (0, 0, 0, 0))[:4]
+    windows_version = VSVersionInfo(
+        ffi=FixedFileInfo(
+            filevers=version_tuple, prodvers=version_tuple, mask=0x3f,
+            flags=0, OS=0x40004, fileType=1, subtype=0, date=(0, 0),
+        ),
+        kids=[
+            StringFileInfo([StringTable("040904B0", [
+                StringStruct("CompanyName", "Crowpaw"),
+                StringStruct("FileDescription", "Water-redstart: the chirping viewer"),
+                StringStruct("FileVersion", app_version),
+                StringStruct("ProductName", "Water-redstart"),
+                StringStruct("ProductVersion", app_version),
+                StringStruct("OriginalFilename", f"v{app_version}.exe"),
+            ])]),
+            VarFileInfo([VarStruct("Translation", [1033, 1200])]),
+        ],
+    )
     exe = EXE(
         pyz,
         a.scripts,
@@ -84,5 +107,6 @@ else:
         upx=True,
         console=False,
         icon=str(icon_file),
+        version=windows_version,
     )
 

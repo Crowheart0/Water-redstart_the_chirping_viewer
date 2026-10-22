@@ -11,6 +11,8 @@ import json
 import io
 import platform
 import threading
+import queue
+import errno
 import time
 import rawpy
 import urllib.request
@@ -18,10 +20,12 @@ import urllib.error
 import tempfile
 import webbrowser
 from functools import partial
-from image_loader import ImageLoader, read_image, read_for_display, get_monitor_profile
+from image_loader import ImageLoader, read_image, read_for_display, get_monitor_profile, RAW_EXTENSIONS
 from image_render import render_viewport
+from selection_copy import copy_selection, LOW_SPACE_BYTES
+from sound_effects import SoundPlayer, load_sound_path, save_sound_path, validate_wav
 
-CURRENT_VERSION = "3.6.0"
+CURRENT_VERSION = "4.0"
 APPLICATION_TITLE = f"🐦 Water-redstart: the chirping viewer v{CURRENT_VERSION}"
 
 # 预读必须与 Tk 完全隔离。Tkinter/Tcl 只允许 UI 主线程访问；后台线程收到的
@@ -127,12 +131,21 @@ class ImageViewer:
 
         self.index = 0
         self.select_folder_name = "SELECT"
+        self.destination_dialog = None
+        self._initial_folder_pending = True
         self.history = []  # 记录操作历史用于撤销
+        self._copy_pending = False
+        self._auto_skip_decode_error = True
+        self._copy_results = queue.SimpleQueue()
+        self._low_space_warned = set()
+        self.custom_sound_path = ""
+        self.sound_player = SoundPlayer()
         
         self.monitor_profile = get_monitor_profile()
         self.image_loader = ImageLoader(workers=3)
         self.detail_loader = ImageLoader()
         self._load_token = None
+        self._deferred_image_error = None
         self._detail_token = None
         self._detail_requested = False
         self._render_job = None
@@ -152,6 +165,8 @@ class ImageViewer:
         self.image_quality = tk.IntVar(value=8000)
         self.raw_mode = tk.StringVar(value='windows' if sys.platform == 'win32' else 'camera')
         self.super_mode = tk.BooleanVar(value=False)  # Super 连拍模式
+        self.save_raw = tk.BooleanVar(value=True)
+        self.save_jpeg = tk.BooleanVar(value=True)
         self.ignored_version = None  # 用户忽略的更新版本
         self.load_config()
         
@@ -164,6 +179,19 @@ class ImageViewer:
         # 进度条
         self.progress_scale = tk.Scale(self.top_frame, from_=0, to=len(self.images)-1 if self.images else 0, orient=tk.HORIZONTAL, bg=self.ui_bg_color, highlightthickness=0, showvalue=0, command=self.on_progress_change)
         self.progress_scale.pack(fill=tk.X, padx=20, pady=1)
+
+        # Only paired RAW+JPEG groups need format choices. Variables belong to
+        # the viewer, not the current frame, so navigating cannot reset them.
+        self.format_frame = tk.Frame(self.top_frame, bg=self.ui_bg_color)
+        tk.Label(self.format_frame, text="同名配对保存：", bg=self.ui_bg_color).pack(side=tk.LEFT)
+        self.raw_checkbox = tk.Checkbutton(
+            self.format_frame, text="保存 RAW", variable=self.save_raw,
+            bg=self.ui_bg_color, command=self.schedule_save_config)
+        self.jpeg_checkbox = tk.Checkbutton(
+            self.format_frame, text="保存 JPEG", variable=self.save_jpeg,
+            bg=self.ui_bg_color, command=self.schedule_save_config)
+        self.raw_checkbox.pack(side=tk.LEFT)
+        self.jpeg_checkbox.pack(side=tk.LEFT)
 
         # 使用 Canvas 来显示图片并支持放大拖拽
         # 设置内边距和圆角边框感 (缩减内边距提高图片占比)
@@ -235,7 +263,7 @@ class ImageViewer:
         self._resize_job = None      # 延迟重绘的任务标识
 
         # 延迟100ms加载第一张图片，等待窗口初始化完成
-        self.root.after(100, self.load_image)
+        self.root.after(100, self._load_initial_folder)
         # 延迟200ms切换为英文输入法，防止中文输入法吞掉快捷键
         self.root.after(200, self.switch_to_english_ime)
 
@@ -281,6 +309,12 @@ class ImageViewer:
         self.images.sort()
 
     def open_folder(self, folder_selected=None):
+        if self._selection_in_progress(notify=True):
+            return
+        # Native directory choosers run a nested Tk loop. Pause the startup
+        # timer before entering it, so it cannot ask about the old directory.
+        resume_initial = self._initial_folder_pending
+        self._initial_folder_pending = False
         if not folder_selected:
             from tkinter import filedialog
             folder_selected = filedialog.askdirectory(title="选择包含照片的文件夹")
@@ -297,8 +331,14 @@ class ImageViewer:
                 self.loading_splash.update()
             
             self.root.after(20, lambda: self._process_open_folder(folder_selected))
+        elif resume_initial:
+            self._initial_folder_pending = True
+            self.root.after_idle(self._load_initial_folder)
 
     def _process_open_folder(self, folder_selected):
+        if self._selection_in_progress():
+            return
+        self._initial_folder_pending = False
         self._cancel_pending_navigation()
         self.save_config()
         self._cancel_preload(clear_cache=True)
@@ -341,6 +381,7 @@ class ImageViewer:
                 self.progress_scale.set(self.index)
             self.update_title()
             self.load_image()
+            self.prompt_destination()
         else:
             self.progress_scale.config(to=0)
             self.progress_scale.set(0)
@@ -358,6 +399,83 @@ class ImageViewer:
                 self.show_empty_state()
                 self.top_info_label.config(text="🐾 欢迎！请挑选一个装满照片的文件夹开始吧~")
                 self.root.title(APPLICATION_TITLE)
+
+    def _load_initial_folder(self):
+        # An explicit folder-open may have happened before the startup timer.
+        if not self._initial_folder_pending:
+            return
+        self._initial_folder_pending = False
+        self.load_image()
+        if self.images:
+            self.prompt_destination()
+
+    def prompt_destination(self):
+        """Confirm the output location once per opened photo folder."""
+        if not self.images or self.destination_dialog is not None:
+            return
+        self.select_folder_name = "SELECT"
+        self._select_count_cache = None
+        self.update_title()
+        dialog = tk.Toplevel(self.root)
+        self.destination_dialog = dialog
+        dialog.title("选择选片目标文件夹")
+        dialog.transient(self.root)
+        dialog.resizable(False, False)
+        tk.Label(dialog, text="挑出的照片保存到哪里？",
+                 font=("Microsoft YaHei", 12, "bold")).pack(padx=24, pady=(18, 8))
+        tk.Label(dialog, text="默认：待选文件夹内的 SELECT 子文件夹\n"
+                 + os.path.join(self.current_dir, "SELECT"),
+                 wraplength=520, justify=tk.LEFT).pack(padx=24, pady=8)
+
+        def accept(destination="SELECT"):
+            self.select_folder_name = destination
+            self._select_count_cache = None
+            self.destination_dialog = None
+            dialog.destroy()
+            self.save_config()
+            self.update_title()
+
+        def browse():
+            from tkinter import filedialog
+            destination = filedialog.askdirectory(
+                title="选择选片目标文件夹", initialdir=self.current_dir, parent=dialog)
+            if destination:
+                # Saving to the originals would acknowledge selections without
+                # creating a separate result, and make later cleanup unsafe.
+                if os.path.normcase(os.path.realpath(destination)) == os.path.normcase(os.path.realpath(self.current_dir)):
+                    messagebox.showwarning(
+                        "请使用独立目标文件夹",
+                        "该目录就是原片所在文件夹。请选择 SELECT 子文件夹或其他位置。",
+                        parent=dialog)
+                    return
+                accept(destination)
+
+        default_button = tk.Button(dialog, text="使用 SELECT", width=25, command=accept)
+        default_button.pack(padx=24, pady=(10, 5))
+        tk.Button(dialog, text="选择其他文件夹…", width=25,
+                  command=browse).pack(padx=24, pady=(5, 18))
+        # Closing the prompt explicitly retains the advertised safe default.
+        dialog.protocol("WM_DELETE_WINDOW", accept)
+        dialog.bind("<Return>", lambda event: accept())
+        dialog.bind("<Escape>", lambda event: accept())
+        dialog.grab_set()
+        default_button.focus_set()
+
+    @staticmethod
+    def _is_raw_jpeg_group(names):
+        extensions = {os.path.splitext(name)[1].lower() for name in names}
+        return bool(extensions & RAW_EXTENSIONS and extensions & {'.jpg', '.jpeg'})
+
+    def _update_format_controls(self):
+        names = (self.image_groups.get(self.images[self.index], [self.images[self.index]])
+                 if 0 <= self.index < len(self.images) else [])
+        if self._is_raw_jpeg_group(names):
+            self.format_frame.pack(pady=(0, 2))
+            state = tk.DISABLED if self._copy_pending else tk.NORMAL
+            self.raw_checkbox.config(state=state)
+            self.jpeg_checkbox.config(state=state)
+        else:
+            self.format_frame.pack_forget()
 
     def show_subfolder_dialog(self, parent_folder, subdirs):
         dialog = tk.Toplevel(self.root)
@@ -462,11 +580,54 @@ class ImageViewer:
         help_menu.add_separator()
         help_menu.add_command(label="🕊️ 检查更新...", command=lambda: threading.Thread(target=self.check_for_updates, daemon=True).start())
         help_menu.add_command(label="关于", command=lambda: messagebox.showinfo(
-            "关于", f"🐦 Water-redstart: the chirping viewer\n\n版本：{CURRENT_VERSION} (双平台)\n作者：Crowpaw@2026\n鸣谢：ARC, Untribiium, ~ris, 蓝嘴红鹊, 欧鹭风云, 瑞瑞的, 白鹡鸰, 灰喜鹊, 碳酸, 逢青, Gemini 3.1 Pro, GPT-5.5, DeepSeek-V4-Pro, YIP\n于一"
+            "关于", f"🐦 Water-redstart: the chirping viewer\n\n版本：{CURRENT_VERSION} (双平台)\n作者：Crowpaw@2026\n鸣谢：ARC, Untribiium, ~ris, 蓝嘴红鹊, 欧鹭风云, 瑞瑞的, 白鹡鸰, 灰喜鹊, 碳酸, 逢青, Gemini 3.1 Pro, GPT-5.5, DeepSeek-V4-Pro, YIP, 绿羊, Mr.Nobody\n于一"
         ))
         self.menubar.add_cascade(label="帮助", menu=help_menu)
-        
+
+        # Keep optional audio controls last; changing them does not rebuild
+        # the existing menus or reset navigation/quality/memory settings.
+        self.sound_menu = tk.Menu(self.menubar, tearoff=0)
+        self.sound_menu.add_command(label=self._selection_sound_label(), state="disabled")
+        self.sound_menu.add_command(label="选择选片成功音效 (WAV)...", command=self.choose_selection_sound)
+        self.sound_menu.add_command(label="试听当前音效", command=self.preview_selection_sound)
+        self.sound_menu.add_separator()
+        self.sound_menu.add_command(label="恢复默认音效", command=self.restore_selection_sound)
+        self.menubar.add_cascade(label="音效", menu=self.sound_menu)
+
         self.root.config(menu=self.menubar)
+
+    def _selection_sound_label(self):
+        path = getattr(self, 'custom_sound_path', '')
+        return "当前：" + (os.path.basename(path) if path else "默认鸟鸣")
+
+    def _set_selection_sound(self, path):
+        try:
+            save_sound_path(self.get_global_config_path(), path)
+        except OSError as error:
+            messagebox.showwarning("音效设置未保存", str(error), parent=self.root)
+            return
+        self.custom_sound_path = path
+        self.sound_menu.entryconfig(0, label=self._selection_sound_label())
+
+    def choose_selection_sound(self):
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(
+            parent=self.root, title="选择选片成功提示音（PCM WAV）",
+            filetypes=[("WAV 音效", "*.wav"), ("所有文件", "*.*")])
+        if not path:
+            return
+        try:
+            path = validate_wav(path)
+        except (OSError, ValueError) as error:
+            messagebox.showwarning("无法使用该音效", str(error), parent=self.root)
+            return
+        self._set_selection_sound(path)
+
+    def preview_selection_sound(self):
+        self.sound_player.play(self.custom_sound_path)
+
+    def restore_selection_sound(self):
+        self._set_selection_sound("")
 
     def apply_bindings(self):
         # 解绑旧的热键
@@ -522,6 +683,9 @@ class ImageViewer:
         self.update_title()
 
     def toggle_reverse(self):
+        if self._selection_in_progress():
+            self.reverse_var.set(self.reverse_mode)
+            return
         self._cancel_pending_navigation()
         self._cancel_preload(clear_cache=True)
         self.reverse_mode = self.reverse_var.get()
@@ -544,7 +708,8 @@ class ImageViewer:
         if (
             self._select_count_cache_path == select_folder_path
             and self._select_count_cache is not None
-            and now - self._select_count_cache_at < SELECT_COUNT_CACHE_SECONDS
+            and (getattr(self, '_copy_pending', False)
+                 or now - self._select_count_cache_at < SELECT_COUNT_CACHE_SECONDS)
         ):
             return self._select_count_cache
 
@@ -565,6 +730,7 @@ class ImageViewer:
         return count
 
     def update_title(self):
+        self._update_format_controls()
         select_count = self.get_select_count()
         folder_name = os.path.basename(self.current_dir.rstrip('/\\')) if self.current_dir else '未选择目录'
         base_title_prefix = f"{APPLICATION_TITLE} (双平台) - {folder_name}"
@@ -580,8 +746,10 @@ class ImageViewer:
             img_name = self.images[self.index]
             group_files = self.image_groups.get(img_name, [img_name])
             group_info = ""
-            if len(group_files) > 1:
+            if self._is_raw_jpeg_group(group_files):
                 group_info = " | 🗂️ J+RAW"
+            elif len(group_files) > 1:
+                group_info = " | 🗂️ 多格式"
                 
             self.root.title(f"{base_title_prefix} | 进度: {self.index + 1}/{len(self.images)} | 🏠入巢: {select_count} | 当前: {img_name}{group_info}")
             self.top_info_label.config(
@@ -590,8 +758,13 @@ class ImageViewer:
         else:
             self.root.title(base_title_prefix)
             self.top_info_label.config(text=f"🏠 入巢: {select_count}只 | {info_help}")
+        if getattr(self, '_copy_pending', False):
+            self.top_info_label.config(
+                text="正在检查空间并保存本组选片… 完成后自动翻页，请稍候。")
 
     def show_hotkey_dialog(self):
+        if self._selection_in_progress(notify=True):
+            return
         dialog = tk.Toplevel(self.root)
         dialog.title("🎈 自定义魔法设置 🎈")
         dialog.geometry("450x680")
@@ -722,6 +895,8 @@ class ImageViewer:
                 messagebox.showwarning("哎呀", "方向动作热键不能互相重复！", parent=dialog)
                 return
                 
+            if self._selection_in_progress(notify=True):
+                return
             self.hotkey_next = dialog.temp_next
             self.hotkey_copy = dialog.temp_copy
             self.hotkey_undo = dialog.temp_undo
@@ -766,6 +941,9 @@ class ImageViewer:
         return os.path.expanduser("~/.birdviewer_global.json")
 
     def load_config(self):
+        self.custom_sound_path = load_sound_path(self.get_global_config_path())
+        if hasattr(self, 'sound_menu'):
+            self.sound_menu.entryconfig(0, label=self._selection_sound_label())
         if os.path.exists(self.config_file):
             try:
                 import json
@@ -780,6 +958,8 @@ class ImageViewer:
                     self.select_folder_name = config.get("select_folder_name", "SELECT")
                     self.ignored_version = config.get("ignored_version", None)
                     self.super_mode.set(config.get("super_mode", False))
+                    self.save_raw.set(config.get("save_raw", True))
+                    self.save_jpeg.set(config.get("save_jpeg", True))
             except Exception:
                 pass
 
@@ -814,7 +994,9 @@ class ImageViewer:
                         "raw_mode": self.raw_mode.get(),
                         "select_folder_name": self.select_folder_name,
                         "ignored_version": getattr(self, 'ignored_version', None),
-                        "super_mode": self.super_mode.get()
+                        "super_mode": self.super_mode.get(),
+                        "save_raw": self.save_raw.get(),
+                        "save_jpeg": self.save_jpeg.get()
                     }, f)
             except Exception:
                 pass
@@ -842,16 +1024,22 @@ class ImageViewer:
         self.image_loader.reset()
         self.detail_loader.reset()
         self._load_token = self._detail_token = None
+        self._deferred_image_error = None
 
     def close(self, save_progress=True):
+        if self._selection_in_progress(notify=True):
+            return
         self._cancel_pending_navigation()
         if save_progress:
             self.save_config()
         self.image_loader.close()
         self.detail_loader.close()
+        self.sound_player.close()
         self.root.destroy()
                         
     def show_end_dialog(self):
+        if self._selection_in_progress():
+            return
         if getattr(self, 'end_dialog_open', False):
             return
         self.end_dialog_open = True
@@ -934,6 +1122,10 @@ class ImageViewer:
         b4.pack(pady=6)
 
     def on_progress_change(self, val):
+        if self._selection_in_progress():
+            if int(val) != self.index:
+                self.progress_scale.set(self.index)
+            return
         new_idx = int(val)
         if new_idx != self.index and 0 <= new_idx < len(self.images):
             self._cancel_pending_navigation()
@@ -953,12 +1145,22 @@ class ImageViewer:
         return tuple(os.path.join(self.current_dir, self.images[index]) for index in indices)
 
     def _poll_image_loader(self):
-        result = self.image_loader.take_result()
+        if (getattr(self, '_deferred_image_error', None) is not None
+                and getattr(self, 'destination_dialog', None) is None):
+            result = self._deferred_image_error
+            self._deferred_image_error = None
+        else:
+            result = self.image_loader.take_result()
         if result is not None and result[0] == self._load_token:
             _, image, error = result
             if image is not None:
                 self._show_loaded_image(image)
-            else:
+            elif getattr(self, 'destination_dialog', None) is not None:
+                # Do not navigate underneath the destination prompt, but also
+                # do not lose the decoder error while its nested loop runs.
+                self._deferred_image_error = result
+            elif (not self._selection_in_progress()
+                  and getattr(self, '_auto_skip_decode_error', True)):
                 print(f"无法打开图片 {self.images[self.index]}: {error}")
                 self.index += 1
                 if self.index < len(self.images):
@@ -1125,8 +1327,11 @@ class ImageViewer:
             self.canvas.pack(fill=tk.BOTH, expand=True)
 
     def load_image(self):
+        # Explicit navigation/quality changes start a new display request.
+        self._auto_skip_decode_error = True
         # 1. 先检查当前目录下有没有图片
         if not self.images:
+            self.format_frame.pack_forget()
             self.show_empty_state()
             self.top_info_label.config(text="🐾 欢迎！请挑选一个装满照片的文件夹开始吧~")
             self.root.title(APPLICATION_TITLE)
@@ -1355,7 +1560,7 @@ class ImageViewer:
 
     def _queue_navigation(self, delta):
         """单次按键立即响应；连发时限频并合并中间位置。"""
-        if not self.images:
+        if self._selection_in_progress() or not self.images:
             return "break"
 
         target = self.index + self._pending_navigation_delta + delta
@@ -1393,46 +1598,103 @@ class ImageViewer:
         return self._queue_navigation(-1)
 
     def copy_and_next(self, event=None):
+        if self._selection_in_progress() or not 0 <= self.index < len(self.images):
+            return "break"
         self._cancel_pending_navigation()
-        if self.index < len(self.images):
-            img_name = self.images[self.index]
-            files_to_copy = self.image_groups.get(img_name, [img_name])
-            
-            # 如果 SELECT 文件夹不存在则创建
-            select_folder_path = self.select_folder_name if os.path.isabs(self.select_folder_name) else os.path.join(self.current_dir, self.select_folder_name)
-            if not os.path.exists(select_folder_path):
-                os.makedirs(select_folder_path)
-                
-            dst_list = []
-            src_list = []
-            for fname in files_to_copy:
-                src_list.append(os.path.join(self.current_dir, fname))
-                dst_list.append(os.path.join(select_folder_path, fname))
-            
-            select_folder = self.select_folder_name
-            
-            def bg_copy():
-                try:
-                    for src, dst, fname in zip(src_list, dst_list, files_to_copy):
-                        # 复制图片并保留其原始的元信息(拍照时间等)
-                        shutil.copy2(src, dst)
-                        print(f"🎉 成功捕捉: {fname} 已飞入 {select_folder} 鸟巢~ 🦉")
-                except Exception as e:
-                    print(f"哎呀，小鸟跑掉啦，复制文件失败:\n{e}")
+        img_name = self.images[self.index]
+        names = self.image_groups.get(img_name, [img_name])
+        if self._is_raw_jpeg_group(names):
+            save_raw, save_jpeg = self.save_raw.get(), self.save_jpeg.get()
+            if not save_raw and not save_jpeg:
+                messagebox.showwarning(
+                    "请选择保存格式", "请至少勾选“保存 RAW”或“保存 JPEG”之一，再挑出照片。",
+                    parent=self.root)
+                return "break"
+            names = [name for name in names
+                     if ((os.path.splitext(name)[1].lower() not in RAW_EXTENSIONS or save_raw)
+                         and (os.path.splitext(name)[1].lower() not in {'.jpg', '.jpeg'} or save_jpeg))]
+        sources = tuple(os.path.join(self.current_dir, name) for name in names)
+        destination = os.path.abspath(os.path.join(self.current_dir, self.select_folder_name))
+        results = self._copy_results
+        # A late decode failure must not undo the user's choice to save this
+        # frame, even if it arrives after a copy-failure warning is dismissed.
+        self._auto_skip_decode_error = False
+        self._copy_pending = True
+        self.update_title()
 
-            # 立即播放音效（主线程，按下即响，避免音画不同步）
-            if sys.platform == 'win32':
-                winsound.Beep(3000, 30)
-                winsound.Beep(3800, 30)
-                winsound.Beep(4500, 50)
-            else:
-                self.root.bell()
+        def bg_copy():
+            # Worker only uses immutable paths and a queue, never Tk objects.
+            try:
+                copied, free = copy_selection(sources, destination)
+                results.put((destination, copied, free, None))
+            except Exception as error:
+                results.put((destination, [], None, error))
 
-            # 立即写入历史记录并执行后台拷贝线程
-            self.history.append({'action': 'copy', 'index': self.index, 'dst_list': dst_list})
-            threading.Thread(target=bg_copy, daemon=True).start()
-        
-        # 复制完后自动翻下一张
+        try:
+            threading.Thread(target=bg_copy, daemon=True, name="selection-copy").start()
+        except Exception as error:
+            results.put((destination, [], None, error))
+        self.root.after(25, self._poll_selection_copy)
+        return "break"
+
+    def _selection_in_progress(self, notify=False):
+        if getattr(self, 'destination_dialog', None) is not None:
+            if notify:
+                self.destination_dialog.lift()
+            return True
+        pending = getattr(self, '_copy_pending', False)
+        if pending and notify:
+            messagebox.showinfo("选片正在保存", "请等待当前这组照片保存完成后再操作。", parent=self.root)
+        return pending
+
+    def _poll_selection_copy(self):
+        try:
+            destination, copied, free, error = self._copy_results.get_nowait()
+        except queue.Empty:
+            self.root.after(25, self._poll_selection_copy)
+            return
+        self._select_count_cache = None
+        if error is not None:
+            self._auto_skip_decode_error = False
+            full = (getattr(error, "errno", None) == errno.ENOSPC
+                    or getattr(error, "winerror", None) in (39, 112))
+            title = "目标文件夹空间不足" if full else "选片保存失败"
+            try:
+                messagebox.showwarning(
+                    title,
+                    f"本组选片未保存成功，已停留在当前照片。\n目标：{destination}\n\n"
+                    f"{error}\n\n请释放目标磁盘空间或在设置中更换目标文件夹，然后重新按挑出键。"
+                    "\n原片保留；本次失败不会记为已选。",
+                    parent=self.root,
+                )
+            finally:
+                self._copy_pending = False
+                self.update_title()
+            return
+        self.history.append({'action': 'copy', 'index': self.index, 'dst_list': copied})
+        try:
+            if free is not None and free < LOW_SPACE_BYTES:
+                if destination not in self._low_space_warned:
+                    self._low_space_warned.add(destination)
+                    messagebox.showwarning(
+                        "目标文件夹空间即将不足",
+                        f"本组选片已保存。\n目标：{destination}\n"
+                        f"剩余空间：{free / 1024**2:.1f} MiB，已低于 256 MiB。\n"
+                        "请及时释放空间或更换目标文件夹；后续每组选片仍会检查容量。",
+                        parent=self.root,
+                    )
+            elif free is not None:
+                self._low_space_warned.discard(destination)
+        finally:
+            # Native message boxes also run a nested Tk loop. Keep the frame
+            # protected until all confirmation dialogs have returned.
+            self._copy_pending = False
+            self.update_title()
+        # Confirmation audio is asynchronous and independent of navigation.
+        try:
+            self.sound_player.play(self.custom_sound_path)
+        except Exception:
+            pass
         self.index += 1
         self.load_image()
 
@@ -1852,6 +2114,8 @@ class ImageViewer:
                 pass
 
     def undo_action(self, event=None):
+        if self._selection_in_progress():
+            return "break"
         self._cancel_pending_navigation()
         if not self.history:
             messagebox.showinfo("哎呀", "没有回忆可以撤销啦！")

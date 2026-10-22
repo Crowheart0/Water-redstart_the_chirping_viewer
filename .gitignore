@@ -6,3 +6,8 @@ __pycache__/
 build/
 dist/
 
+# Local releases, samples, build caches, settings and working notes.
+/_local/
+/*.exe
+/*.exe.sha256
+

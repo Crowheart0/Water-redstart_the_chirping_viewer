@@ -15,23 +15,82 @@ Only a maintainer with tag permission performs these steps after the release PR
 has merged:
 
 1. Confirm `CURRENT_VERSION` in `photo_viewer.py` is the intended semantic
-   version, for example `3.6.0`.
+   version, for example `4.0`.
 2. Create and push the matching tag from the merged commit:
 
    ```bash
-   git tag v3.6.0
-   git push origin v3.6.0
+   git tag v4.0
+   git push origin v4.0
    ```
 
 3. The `Build and release` workflow tests and builds all platforms, then creates
    the GitHub Release and uploads:
 
-   - `Water-redstart_v3.6.0_windows_x64.exe`
-   - `Water-redstart_v3.6.0_macos_arm64.zip`
-   - `Water-redstart_v3.6.0_macos_x64.zip`
+   - `Water-redstart_v4.0_windows_x64.exe`
+   - `Water-redstart_v4.0_macos_arm64.zip`
+   - `Water-redstart_v4.0_macos_x64.zip`
    - one SHA-256 file for each package
 
 The workflow rejects a tag whose version does not match `CURRENT_VERSION`.
+
+## Local Windows v4.0 package
+
+Use Python 3.12 and a separate build environment:
+
+```powershell
+python -m venv .venv-v4
+.\.venv-v4\Scripts\python.exe -m pip install -r requirements-build.txt
+.\.venv-v4\Scripts\python.exe -B -m unittest -v test_photo_viewer
+.\.venv-v4\Scripts\python.exe -B -m unittest discover -s tests -v
+New-Item -ItemType Directory -Force -Path _local\releases | Out-Null
+$env:PYINSTALLER_CONFIG_DIR = Join-Path (Get-Location) '_local\build\pyinstaller-cache'
+.\.venv-v4\Scripts\python.exe -m PyInstaller --noconfirm --clean --workpath _local\build\pyinstaller --distpath _local\dist Water-redstart.spec
+Copy-Item -LiteralPath _local\dist\Water-redstart.exe -Destination _local\releases\v4.0.exe
+.\.venv-v4\Scripts\python.exe -B scripts\verify_release.py
+Get-FileHash -LiteralPath _local\releases\v4.0.exe -Algorithm SHA256
+```
+
+The spec embeds `bird.ico` as both the Windows EXE icon and a runtime resource,
+and derives Windows file/product version metadata from `CURRENT_VERSION`.
+The local requested filename is `v4.0.exe`; the workflow retains its
+platform-qualified asset naming. Local packaging does not publish a release.
+
+## Files to commit and local-only files
+
+Keep source code, tests, icons, the current `Water-redstart.spec`, build/document
+requirements, reusable scripts and project documentation in Git. The existing
+`readme/README.html` and `readme/README.pdf` remain versioned documentation.
+
+Use the ignored `_local/` directory for files that are not source-control inputs:
+
+- `releases/`: EXE and SHA-256 files to upload as GitHub Release assets, not commits.
+- `archive/`: older EXE files and superseded local packaging specs.
+- `samples/`: personal RAW/photo samples.
+- `build/` and `dist/`: temporary builds, previews, local checks and generated packages.
+- `work-notes/`: session plans and working logs.
+- `settings/`: archived local application preferences.
+
+Existing `.venv` and `.venv-v4` environments stay in place and remain ignored:
+moving a virtual environment can invalidate its embedded tool paths. Root-level
+`build/`, `dist/` and EXE outputs also remain ignored as a fallback for direct
+PyInstaller invocations. Do not use `git add -f` on these local-only files.
+
+## Recompile README
+
+The source is `README.md`; the checked-in exports are
+`readme/README.html` and `readme/README.pdf`.
+
+```powershell
+python -m pip install -r requirements-docs.txt
+python scripts/build_readme.py
+```
+
+The script uses Python Markdown and a local Chrome or Edge browser in headless
+mode. It generates a self-contained HTML document and an A4 PDF. It preserves
+relative repository links by adjusting them for the `readme/` directory.
+Review the generated PDF visually before distribution. Back up uncommitted
+exports before overwriting them. Temporary browser profiles are created under
+`_local/build/readme-render/`.
 
 ## macOS signing status
 
