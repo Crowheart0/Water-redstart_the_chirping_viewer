@@ -46,7 +46,6 @@ class SelectionTests(unittest.TestCase):
         v.update_title = Mock()
         v.load_image = Mock()
         v.image_loader = Mock()
-        v.detail_loader = Mock()
         v.save_config = Mock()
         self.dialog = self.enterContext(patch.object(photo_viewer, "messagebox"))
         if hasattr(photo_viewer, "winsound"):
@@ -247,7 +246,6 @@ class SelectionTests(unittest.TestCase):
         self.viewer._load_token = "slow-decoder"
         self.viewer.image_loader.take_result.return_value = (
             "slow-decoder", None, ValueError("Unsupported RAW"))
-        self.viewer.detail_loader.take_result.return_value = None
         self.viewer.show_end_dialog = Mock()
 
     def test_decode_failure_during_disk_warning_cannot_change_frame(self):

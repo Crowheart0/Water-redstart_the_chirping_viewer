@@ -28,7 +28,7 @@ class ViewerTests(unittest.TestCase):
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             root.update()
-            if viewer.current_img_obj is not None:
+            if viewer.current_img_obj is not None and not getattr(viewer, '_image_pending', False):
                 return
             time.sleep(0.01)
         self.fail('Photo did not appear in Tk')
@@ -73,7 +73,7 @@ class ViewerTests(unittest.TestCase):
                         root.after_cancel(job)
                     viewer.close()
 
-    def test_zoom_batches_events_and_detail_keeps_view(self):
+    def test_zoom_batches_events_without_reloading_ready_detail(self):
         with tempfile.TemporaryDirectory() as directory:
             Image.new('RGB', (3200, 2400), 'red').save(os.path.join(directory, 'large.jpg'))
             root = self.make_root()
@@ -88,8 +88,9 @@ class ViewerTests(unittest.TestCase):
                     while time.monotonic() < end:
                         root.update()
                         time.sleep(0.005)
-                    self.assertEqual(viewer.current_img_obj.size, (1600, 1200))
+                    self.assertEqual(viewer.current_img_obj.size, (3200, 2400))
                     self.assertGreater(len(viewer.current_img_obj.info['display_levels']), 0)
+                    ready_image = viewer.current_img_obj
                     with patch.object(viewer, 'display_image', wraps=viewer.display_image) as rendered:
                         for _ in range(12):
                             viewer.on_mouse_wheel(SimpleNamespace(delta=120, x=100, y=100))
@@ -99,17 +100,17 @@ class ViewerTests(unittest.TestCase):
                         self.assertIsNotNone(pending)
                         scale_before, x_before, y_before = viewer.current_scale, viewer.im_x, viewer.im_y
                         end = time.monotonic() + 5
-                        while time.monotonic() < end and viewer.current_img_obj.width < 3200:
+                        while time.monotonic() < end and viewer._render_job is not None:
                             root.update()
                             time.sleep(0.005)
                     self.assertEqual(viewer.current_img_obj.size, (3200, 2400))
-                    self.assertAlmostEqual(viewer.current_scale, scale_before / 2)
-                    self.assertAlmostEqual(viewer.im_x, x_before * 2)
-                    self.assertAlmostEqual(viewer.im_y, y_before * 2)
+                    self.assertIs(viewer.current_img_obj, ready_image)
+                    self.assertAlmostEqual(viewer.current_scale, scale_before)
+                    self.assertAlmostEqual(viewer.im_x, x_before)
+                    self.assertAlmostEqual(viewer.im_y, y_before)
                     viewer._process_open_folder(directory)
                     self.wait_image(root, viewer)
-                    self.assertEqual(viewer.current_img_obj.size, (1600, 1200))
-                    self.assertIsNone(viewer._detail_token)
+                    self.assertEqual(viewer.current_img_obj.size, (3200, 2400))
                 finally:
                     viewer.close()
 
@@ -192,7 +193,7 @@ class ViewerTests(unittest.TestCase):
 class DestinationDialogTests(ViewerTests):
     # Only run the destination-specific methods here, not inherited test cases.
     test_full_destination_can_retry_last_photo_before_completion_dialog = None
-    test_zoom_batches_events_and_detail_keeps_view = None
+    test_zoom_batches_events_without_reloading_ready_detail = None
     test_navigation_quality_and_folder_switch = None
     test_paired_checkboxes_keep_state_between_frames_and_config_reload = None
 

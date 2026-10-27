@@ -35,7 +35,9 @@ PRELOAD_NORMAL_COUNT = 12
 PRELOAD_LOW_MEMORY_COUNT = 4
 PRELOAD_SUPER_STARTUP_COUNT = 24
 PRELOAD_SUPER_COUNT = 16
-NAVIGATION_THROTTLE_MS = 120
+IMAGE_CACHE_BYTES = 768 * 1024 * 1024
+LOW_MEMORY_CACHE_BYTES = 192 * 1024 * 1024
+NAVIGATION_THROTTLE_MS = 16
 CONFIG_SAVE_DELAY_MS = 500
 SELECT_COUNT_CACHE_SECONDS = 2.0
 
@@ -87,16 +89,16 @@ def _decode_image_fast(img_path, size_val):
         return None
 
 
-def _build_preload_indices(current_idx, image_count, preload_count):
+def _build_preload_indices(current_idx, image_count, preload_count, direction=1):
     """返回当前页附近的有序预读索引，优先保留少量后向缓存。"""
     indices = []
     for offset in range(1, PRELOAD_BEHIND_COUNT + 1):
-        idx = current_idx - offset
-        if idx >= 0:
+        idx = current_idx - offset * direction
+        if 0 <= idx < image_count:
             indices.append(idx)
     for offset in range(1, preload_count + 1):
-        idx = current_idx + offset
-        if idx < image_count:
+        idx = current_idx + offset * direction
+        if 0 <= idx < image_count:
             indices.append(idx)
     return tuple(indices)
 
@@ -142,12 +144,16 @@ class ImageViewer:
         self.sound_player = SoundPlayer()
         
         self.monitor_profile = get_monitor_profile()
-        self.image_loader = ImageLoader(workers=3)
-        self.detail_loader = ImageLoader()
+        self.image_loader = ImageLoader(
+            workers=3, budget_bytes=IMAGE_CACHE_BYTES,
+            low_memory_budget_bytes=LOW_MEMORY_CACHE_BYTES, estimate_prefetch=True)
         self._load_token = None
+        self._image_pending = False
+        self._end_after_load = False
+        self._displayed_index = None
+        self._last_requested_index = None
+        self._navigation_direction = 1
         self._deferred_image_error = None
-        self._detail_token = None
-        self._detail_requested = False
         self._render_job = None
         self._canvas_image_id = None
         self.root.after(20, self._poll_image_loader)
@@ -346,6 +352,13 @@ class ImageViewer:
         # 清理当前资源
         self.current_img_obj = None
         self.tk_image = None
+        self._displayed_index = None
+        self._image_pending = False
+        self._end_after_load = False
+        self._last_requested_index = None
+        self._navigation_direction = 1
+        self.canvas.delete('all')
+        self._canvas_image_id = None
         self.images = []
         self._select_count_cache = None
         self._select_count_cache_path = None
@@ -467,11 +480,12 @@ class ImageViewer:
         return bool(extensions & RAW_EXTENSIONS and extensions & {'.jpg', '.jpeg'})
 
     def _update_format_controls(self):
-        names = (self.image_groups.get(self.images[self.index], [self.images[self.index]])
-                 if 0 <= self.index < len(self.images) else [])
+        index = self._display_index()
+        names = (self.image_groups.get(self.images[index], [self.images[index]])
+                 if index is not None and 0 <= index < len(self.images) else [])
         if self._is_raw_jpeg_group(names):
             self.format_frame.pack(pady=(0, 2))
-            state = tk.DISABLED if self._copy_pending else tk.NORMAL
+            state = tk.DISABLED if self._copy_pending or getattr(self, '_image_pending', False) else tk.NORMAL
             self.raw_checkbox.config(state=state)
             self.jpeg_checkbox.config(state=state)
         else:
@@ -542,7 +556,7 @@ class ImageViewer:
         settings_menu.add_checkbutton(label="倒序选片 (从后往前)", variable=self.reverse_var, command=self.toggle_reverse)
         
         self.low_memory_mode = tk.BooleanVar(value=False)
-        settings_menu.add_checkbutton(label="省内存模式 (缓存上限96MB)", variable=self.low_memory_mode)
+        settings_menu.add_checkbutton(label="省内存模式 (缓存上限192MiB)", variable=self.low_memory_mode)
         settings_menu.add_checkbutton(label="🚀 Super 连拍模式 (启动24张/翻页16张)", variable=self.super_mode)
         
         quality_menu = tk.Menu(settings_menu, tearoff=0)
@@ -691,6 +705,10 @@ class ImageViewer:
         self.reverse_mode = self.reverse_var.get()
         self.images.reverse()
         self.index = len(self.images) - 1 - self.index
+        self._last_requested_index = None
+        self._navigation_direction = 1
+        if self._displayed_index is not None:
+            self._displayed_index = len(self.images) - 1 - self._displayed_index
         # history reset may be good, or just update indices in history, but simpler to clear history
         self.history.clear()
         self.progress_scale.set(self.index)
@@ -729,6 +747,12 @@ class ImageViewer:
         self._select_count_cache_at = now
         return count
 
+    def _display_index(self):
+        """The retained bitmap keeps its own identity until its replacement is ready."""
+        if getattr(self, '_image_pending', False):
+            return getattr(self, '_displayed_index', None)
+        return self.index
+
     def update_title(self):
         self._update_format_controls()
         select_count = self.get_select_count()
@@ -742,8 +766,9 @@ class ImageViewer:
                      f"~ 放大: [{self.hotkey_magnify.title()}]  "
                      f"[i] 属性: [{self.hotkey_properties.upper()}]")
 
-        if self.images and self.index < len(self.images):
-            img_name = self.images[self.index]
+        index = self._display_index()
+        if self.images and index is not None and 0 <= index < len(self.images):
+            img_name = self.images[index]
             group_files = self.image_groups.get(img_name, [img_name])
             group_info = ""
             if self._is_raw_jpeg_group(group_files):
@@ -751,9 +776,9 @@ class ImageViewer:
             elif len(group_files) > 1:
                 group_info = " | 🗂️ 多格式"
                 
-            self.root.title(f"{base_title_prefix} | 进度: {self.index + 1}/{len(self.images)} | 🏠入巢: {select_count} | 当前: {img_name}{group_info}")
+            self.root.title(f"{base_title_prefix} | 进度: {index + 1}/{len(self.images)} | 🏠入巢: {select_count} | 当前: {img_name}{group_info}")
             self.top_info_label.config(
-                text=f"🐾 进度：{self.index + 1}/{len(self.images)} 📷 【{img_name}】{group_info} | 🏠 入巢: {select_count}只 | {info_help}"
+                text=f"🐾 进度：{index + 1}/{len(self.images)} 📷 【{img_name}】{group_info} | 🏠 入巢: {select_count}只 | {info_help}"
             )
         else:
             self.root.title(base_title_prefix)
@@ -1022,8 +1047,7 @@ class ImageViewer:
     def _cancel_preload(self, clear_cache=False):
         """Invalidate in-flight loads when folder, order or settings change."""
         self.image_loader.reset()
-        self.detail_loader.reset()
-        self._load_token = self._detail_token = None
+        self._load_token = None
         self._deferred_image_error = None
 
     def close(self, save_progress=True):
@@ -1033,7 +1057,6 @@ class ImageViewer:
         if save_progress:
             self.save_config()
         self.image_loader.close()
-        self.detail_loader.close()
         self.sound_player.close()
         self.root.destroy()
                         
@@ -1140,8 +1163,10 @@ class ImageViewer:
             count = PRELOAD_SUPER_STARTUP_COUNT if self.index <= 2 else PRELOAD_SUPER_COUNT
         else:
             count = PRELOAD_NORMAL_COUNT
-        indices = _build_preload_indices(self.index, len(self.images), count)
-        indices = sorted(indices, key=lambda index: (index < self.index, abs(index - self.index)))
+        direction = getattr(self, '_navigation_direction', 1)
+        indices = _build_preload_indices(self.index, len(self.images), count, direction)
+        indices = sorted(indices, key=lambda index: ((index - self.index) * direction < 0,
+                                                     abs(index - self.index)))
         return tuple(os.path.join(self.current_dir, self.images[index]) for index in indices)
 
     def _poll_image_loader(self):
@@ -1168,50 +1193,23 @@ class ImageViewer:
                 else:
                     self.index = len(self.images) - 1
                     self.show_end_dialog()
-        detail = self.detail_loader.take_result()
-        if detail is not None and detail[0] == self._detail_token:
-            _, image, error = detail
-            if image is not None and self.current_img_obj is not None:
-                old_w, old_h = self.current_img_obj.size
-                factor_x, factor_y = image.width / old_w, image.height / old_h
-                self.im_x *= factor_x
-                self.im_y *= factor_y
-                self.current_scale /= factor_x
-                if getattr(self, 'is_magnifying', False) and hasattr(self, 'pre_magnify_state'):
-                    state = self.pre_magnify_state
-                    state['im_x'] *= factor_x
-                    state['im_y'] *= factor_y
-                    state['current_scale'] /= factor_x
-                self.current_img_obj = image
-                self.root.title(self.root.title().replace(' | 高清细节加载中…', ''))
-                self._schedule_render()
-            elif error:
-                print(f'细节加载失败: {error}')
-                self.root.title(self.root.title().replace('高清细节加载中…', '高清读取失败，保留预览'))
         self.root.after(8, self._poll_image_loader)
 
 
     def _show_loaded_image(self, image):
         self.current_img_obj = image
+        self._image_pending = False
+        self._displayed_index = self.index
         self.is_fit = True
         self.is_magnifying = False
         self.display_image()
+        self.update_title()
         label = image.info.get('decoder_label')
         if label and os.path.splitext(self.images[self.index])[1].lower() in ('.nef', '.nrw'):
             self.root.title(self.root.title() + ' | ' + label)
-
-
-    def _request_detail(self):
-        if self._detail_requested or self.current_img_obj is None:
-            return
-        self._detail_requested = True
-        if self.image_quality.get() <= 1600:
-            return
-        decoder = partial(read_for_display, raw_mode=self.raw_mode.get(), monitor_profile=self.monitor_profile)
-        self.detail_loader.decoder = decoder
-        path = os.path.join(self.current_dir, self.images[self.index])
-        self._detail_token, image = self.detail_loader.request(path, self.image_quality.get())
-        self.root.title(self.root.title() + ' | 高清细节加载中…')
+        if self._end_after_load:
+            self._end_after_load = False
+            self.show_end_dialog()
 
 
     def _schedule_render(self):
@@ -1340,16 +1338,24 @@ class ImageViewer:
         self.hide_empty_state()
 
         # 检查是否看到最后一张了
-        if self.index >= len(self.images):
+        reached_end = self.index >= len(self.images)
+        if reached_end:
             # 将索引先倒退回最后一张，防止越界崩溃
             self.index = len(self.images) - 1
-            self.show_end_dialog()
-            return
+            if not self._image_pending and self._displayed_index == self.index:
+                self.show_end_dialog()
+                return
+            # A rapid jump may overtake an unfinished decode. Request the
+            # actual final frame before reporting completion; never relabel
+            # a late result from an earlier index as the final photo.
+        self._end_after_load = reached_end
 
         img_path = os.path.join(self.current_dir, self.images[self.index])
-        self.detail_loader.reset()
-        self._detail_token = None
-        self._detail_requested = False
+        previous = self._last_requested_index
+        if previous is not None and self.index != previous:
+            self._navigation_direction = 1 if self.index > previous else -1
+        self._last_requested_index = self.index
+        self._image_pending = True
         if self._render_job is not None:
             self.root.after_cancel(self._render_job)
             self._render_job = None
@@ -1358,20 +1364,18 @@ class ImageViewer:
         self.image_loader.decoder = partial(read_for_display, raw_mode=self.raw_mode.get(),
                                             monitor_profile=self.monitor_profile)
         self._load_token, image = self.image_loader.request(
-            img_path, min(1600, self.image_quality.get()), neighbors, self.low_memory_mode.get())
-        self.update_title()
+            img_path, self.image_quality.get(), neighbors, self.low_memory_mode.get())
         self.progress_scale.set(self.index)
         self.schedule_save_config()
         if image is not None:
             self._show_loaded_image(image)
         else:
-            # Do not show the previous photo under the new file's name.
-            self.current_img_obj = None
-            self.tk_image = None
-            self.canvas.delete('all')
-            self.canvas.create_text(self.canvas.winfo_width() // 2,
-                                    self.canvas.winfo_height() // 2,
-                                    text='正在加载照片…', fill='#555555')
+            # Keep the old bitmap AND its identity. A cache miss must not turn
+            # every navigation into a white loading frame. Every replacement
+            # is already at selected quality, including its first Space zoom.
+            # File actions remain
+            # gated until the requested image is actually displayed.
+            self.update_title()
 
     @staticmethod
     def _decode_touchpad_delta(packed_delta):
@@ -1405,7 +1409,6 @@ class ImageViewer:
         self.im_x = cursor_im_x - (x - ww / 2) / self.current_scale
         self.im_y = cursor_im_y - (y - wh / 2) / self.current_scale
 
-        self._request_detail()
         self._schedule_render()
         return "break"
 
@@ -1468,7 +1471,6 @@ class ImageViewer:
                 'im_x': getattr(self, 'im_x', 0),
                 'im_y': getattr(self, 'im_y', 0)
             }
-            self._request_detail()
             self._schedule_render()
 
     def on_space_release(self, event=None):
@@ -1532,14 +1534,17 @@ class ImageViewer:
             # 使用 BILINEAR 加速交互期的拖动与缩放刷新
             resized_img = render_viewport(self.current_img_obj,
                 (crop_left, crop_top, crop_right, crop_bottom), (int(dest_w), int(dest_h)))
-            self.tk_image = ImageTk.PhotoImage(resized_img)
+            next_tk_image = ImageTk.PhotoImage(resized_img)
             x, y = dest_left + int(dest_w / 2), dest_top + int(dest_h / 2)
             if self._canvas_image_id is not None and self.canvas.type(self._canvas_image_id):
-                self.canvas.itemconfig(self._canvas_image_id, image=self.tk_image)
+                self.canvas.itemconfig(self._canvas_image_id, image=next_tk_image)
                 self.canvas.coords(self._canvas_image_id, x, y)
             else:
                 self.canvas.delete('all')
-                self._canvas_image_id = self.canvas.create_image(x, y, image=self.tk_image, anchor=tk.CENTER)
+                self._canvas_image_id = self.canvas.create_image(x, y, image=next_tk_image, anchor=tk.CENTER)
+            # Release the previous Tcl image only after the canvas references
+            # its replacement; no delete/recreate gap on ordinary navigation.
+            self.tk_image = next_tk_image
         else:
             if self._canvas_image_id is not None:
                 self.canvas.delete(self._canvas_image_id)
@@ -1598,7 +1603,8 @@ class ImageViewer:
         return self._queue_navigation(-1)
 
     def copy_and_next(self, event=None):
-        if self._selection_in_progress() or not 0 <= self.index < len(self.images):
+        if (getattr(self, '_image_pending', False) or self._selection_in_progress()
+                or not 0 <= self.index < len(self.images)):
             return "break"
         self._cancel_pending_navigation()
         img_name = self.images[self.index]
@@ -1699,6 +1705,8 @@ class ImageViewer:
         self.load_image()
 
     def copy_to_os_clipboard(self, event=None):
+        if getattr(self, '_image_pending', False):
+            return "break"
         self._cancel_pending_navigation()
         if not self.images or self.index >= len(self.images):
             return
@@ -1740,6 +1748,8 @@ class ImageViewer:
 
     def show_image_properties(self, event=None):
         """显示当前图片的属性信息，支持多图时弹出选择框"""
+        if getattr(self, '_image_pending', False):
+            return "break"
         self._cancel_pending_navigation()
         if not self.images or self.index >= len(self.images):
             return

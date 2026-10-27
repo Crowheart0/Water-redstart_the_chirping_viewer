@@ -43,7 +43,6 @@ class ZoomTests(unittest.TestCase):
 
         viewer.display_image = display_image
         viewer._schedule_render = display_image
-        viewer._request_detail = mock.Mock()
         return viewer
 
     def assert_cursor_anchor_is_stable(self, viewer, event, old_anchor):

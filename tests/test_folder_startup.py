@@ -58,8 +58,6 @@ class FolderStartupTests(unittest.TestCase):
         viewer.image_loader = Mock()
         viewer.image_loader.take_result.side_effect = [
             ("first", None, ValueError("broken image")), None]
-        viewer.detail_loader = Mock()
-        viewer.detail_loader.take_result.return_value = None
         viewer.destination_dialog = Mock()
         viewer._poll_image_loader()
         self.assertEqual(viewer.index, 0)

@@ -53,6 +53,29 @@ class RenderTests(unittest.TestCase):
                 read_for_display(path, 1600)
                 self.assertEqual(decode.call_count, 2)
 
+    def test_selected_quality_raw_cache_is_lossless_and_separates_quality(self):
+        from unittest.mock import MagicMock
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'sharp.nef')
+            with open(path, 'wb') as stream:
+                stream.write(b'raw placeholder')
+            raw = MagicMock()
+            raw.__enter__.return_value = raw
+            raw.sizes.flip = 0
+            with patch('image_loader.tempfile.gettempdir', return_value=directory), \
+                    patch('windows_decoder.decode_windows', side_effect=lambda *args:
+                          Image.new('RGB', (3200, 2000), (40, 70, 130))) as decode, \
+                    patch('image_loader.rawpy.RawPy', return_value=raw):
+                for count, quality in enumerate((8000, 4000, 2000), 1):
+                    with self.subTest(quality=quality):
+                        first = read_for_display(path, quality)
+                        second = read_for_display(path, quality)
+                        self.assertEqual(decode.call_count, count)
+                        self.assertEqual(first.size, (min(quality, 3200), min(quality, 3200) * 5 // 8))
+                        self.assertEqual(first.tobytes(), second.tobytes())
+                        self.assertIn('缓存', second.info['decoder_label'])
+                        self.assertTrue(second.info['display_levels'])
+
     @unittest.skipUnless(os.name == 'nt', 'Windows only')
     def test_actual_windows_decoder_pixels_and_scaling(self):
         with tempfile.TemporaryDirectory() as directory:

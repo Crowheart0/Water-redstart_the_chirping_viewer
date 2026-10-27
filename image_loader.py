@@ -112,7 +112,9 @@ def read_for_display(path, quality, raw_mode='windows', monitor_profile=None):
     raw_file = os.path.splitext(path)[1].lower() in RAW_EXTENSIONS
     decoder = '普通照片'
     cache_path = None
-    if raw_file and raw_mode == 'windows' and quality <= 1600:
+    # Cache the selected display quality too: displayed frames are now ready
+    # for Space zoom, not a separate 1600px preview followed by a detail load.
+    if raw_file and raw_mode == 'windows':
         try:
             stamp = os.stat(path)
             monitor_stamp = os.stat(monitor_profile).st_mtime_ns if monitor_profile else 0
@@ -205,16 +207,28 @@ def get_monitor_profile():
 
 class ImageLoader:
     """Decoders prioritize the latest request and share bounded prefetch results."""
-    def __init__(self, decoder=read_image, workers=1):
+    def __init__(self, decoder=read_image, workers=1, *,
+                 budget_bytes=256 * 1024 * 1024,
+                 low_memory_budget_bytes=96 * 1024 * 1024,
+                 estimate_prefetch=False):
+        for name, value in (('budget_bytes', budget_bytes),
+                            ('low_memory_budget_bytes', low_memory_budget_bytes)):
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f'{name} must be a positive integer')
         self.decoder = decoder
         self.condition = threading.Condition()
         self.cache = OrderedDict()
         self.cache_bytes = 0
-        self.budget = 256 * 1024 * 1024
+        self.normal_budget = budget_bytes
+        self.low_memory_budget = low_memory_budget_bytes
+        self.budget = self.normal_budget
+        self.estimate_prefetch = estimate_prefetch
         self.generation = 0
         self.request_id = 0
         self.pending = None
         self.prefetch = deque()
+        self.desired = {}
+        self.known_sizes = {}
         self.result = None
         self.closed = False
         self.in_flight = set()
@@ -235,8 +249,11 @@ class ImageLoader:
             self.generation += 1
             self.pending = self.result = None
             self.prefetch.clear()
+            self.desired.clear()
+            self.known_sizes.clear()
             self.cache.clear()
             self.cache_bytes = 0
+            self.condition.notify_all()
 
     def request(self, path, quality, neighbors=(), low_memory=False):
         key = (os.path.abspath(path), quality)
@@ -244,9 +261,17 @@ class ImageLoader:
             self.request_id += 1
             token = self.request_id
             self.result = None
-            self.budget = (96 if low_memory else 256) * 1024 * 1024
+            self.budget = self.low_memory_budget if low_memory else self.normal_budget
+            # Order is the latest browsing priority, independent of which
+            # decoder finishes first. Include the foreground only once.
+            window = dict.fromkeys([key, *((os.path.abspath(p), quality) for p in neighbors)])
+            self.desired = {item: rank for rank, item in enumerate(window)}
+            self.known_sizes = {item: size for item, size in self.known_sizes.items()
+                                if item in self.desired}
             self._trim()
-            self.prefetch = deque((os.path.abspath(p), quality) for p in neighbors)
+            self.prefetch = deque(item for item in self.desired
+                                  if item != key and item not in self.cache
+                                  and self._can_fit(item, self._estimated_bytes(item)))
             image = self.cache.get(key)
             if image is not None:
                 self.cache.move_to_end(key)
@@ -267,13 +292,40 @@ class ImageLoader:
             self.cache.clear()
             self.cache_bytes = 0
             self.prefetch.clear()
+            self.desired.clear()
+            self.known_sizes.clear()
             self.pending = self.result = None
             self.condition.notify_all()
 
-    def _trim(self, required=0):
-        while self.cache and self.cache_bytes + required > self.budget:
-            _, image = self.cache.popitem(last=False)
-            self.cache_bytes -= self._bytes(image)
+    def _trim(self, required=0, priority=None):
+        for key in list(self.cache):
+            if key not in self.desired:
+                self.cache_bytes -= self._bytes(self.cache.pop(key))
+        # Keep the foreground and closest neighbors even after a budget
+        # reduction, or when a slower near frame arrives after a far frame.
+        for key in sorted(self.cache, key=self.desired.__getitem__, reverse=True):
+            if self.cache_bytes + required <= self.budget:
+                break
+            if priority is not None and self.desired[key] <= priority:
+                break
+            self.cache_bytes -= self._bytes(self.cache.pop(key))
+
+    def _can_fit(self, key, size):
+        priority = self.desired[key]
+        protected = sum(self._bytes(image) for item, image in self.cache.items()
+                        if self.desired[item] < priority)
+        return protected + size <= self.budget
+
+    def _estimated_bytes(self, key):
+        """Estimate speculation only; decoded pixels always use their real size."""
+        if key in self.known_sizes:
+            return self.known_sizes[key]
+        if self.estimate_prefetch and self.known_sizes:
+            current = next(iter(self.desired), None)
+            if current in self.known_sizes:
+                return self.known_sizes[current]
+            return max(self.known_sizes.values())
+        return 1
 
     def _run(self):
         while True:
@@ -288,8 +340,10 @@ class ImageLoader:
                         key, token, generation = self.prefetch.popleft(), None, self.generation
                         if key in self.cache or (generation, key) in self.in_flight:
                             continue
-                        if self.cache_bytes >= self.budget:
-                            self.prefetch.clear()
+                        # A discarded far frame may still be in the window.
+                        # Remember its size, not its pixels, so repeated cache
+                        # hits do not repeatedly decode a frame that cannot fit.
+                        if not self._can_fit(key, self._estimated_bytes(key)):
                             continue
                     else:
                         self.condition.wait()
@@ -307,7 +361,8 @@ class ImageLoader:
                 self.condition.notify_all()
                 if self.closed:
                     return
-                if generation != self.generation:
+                if generation != self.generation or key not in self.desired:
+                    image = None
                     continue
                 # A prefetch can become the requested photo while decoding.
                 if self.pending is not None and self.pending[0] == key:
@@ -315,18 +370,13 @@ class ImageLoader:
                     self.pending = None
                 if image is not None:
                     size = self._bytes(image)
-                    if size <= self.budget:
-                        if token is not None:
-                            self._trim(size)
-                        if self.cache_bytes + size <= self.budget:
-                            old = self.cache.pop(key, None)
-                            if old is not None:
-                                self.cache_bytes -= self._bytes(old)
-                            self.cache[key] = image
-                            self.cache_bytes += size
-                        else:
-                            self.prefetch.clear()
-                    else:
-                        self.prefetch.clear()
+                    self.known_sizes[key] = size
+                    if self._can_fit(key, size):
+                        self._trim(size, priority=self.desired[key])
+                        self.cache[key] = image
+                        self.cache_bytes += size
                 if token == self.request_id:
                     self.result = (token, image, error)
+                # An idle decoder must not retain an evicted image via its
+                # local variable after the rolling window has moved on.
+                image = None

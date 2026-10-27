@@ -39,13 +39,16 @@ Use Python 3.12 and a separate build environment:
 
 ```powershell
 python -m venv .venv-v4
+$env:PYTHONIOENCODING = 'utf-8'
 .\.venv-v4\Scripts\python.exe -m pip install -r requirements-build.txt
 .\.venv-v4\Scripts\python.exe -B -m unittest -v test_photo_viewer
 .\.venv-v4\Scripts\python.exe -B -m unittest discover -s tests -v
 New-Item -ItemType Directory -Force -Path _local\releases | Out-Null
+New-Item -ItemType Directory -Force -Path dist | Out-Null
 $env:PYINSTALLER_CONFIG_DIR = Join-Path (Get-Location) '_local\build\pyinstaller-cache'
 .\.venv-v4\Scripts\python.exe -m PyInstaller --noconfirm --clean --workpath _local\build\pyinstaller --distpath _local\dist Water-redstart.spec
 Copy-Item -LiteralPath _local\dist\Water-redstart.exe -Destination _local\releases\v4.0.exe
+Copy-Item -LiteralPath _local\releases\v4.0.exe -Destination dist\v4.0.exe
 .\.venv-v4\Scripts\python.exe -B scripts\verify_release.py
 Get-FileHash -LiteralPath _local\releases\v4.0.exe -Algorithm SHA256
 ```
@@ -54,6 +57,19 @@ The spec embeds `bird.ico` as both the Windows EXE icon and a runtime resource,
 and derives Windows file/product version metadata from `CURRENT_VERSION`.
 The local requested filename is `v4.0.exe`; the workflow retains its
 platform-qualified asset naming. Local packaging does not publish a release.
+Final local deliverables are placed in root `dist/`; build inputs, temporary
+files and archived packages stay under `_local/`. Preserve existing packages
+before replacing them. For a same-version re-release, record checksums and
+verify that the embedded modules match the repaired source, not just the
+unchanged version string.
+
+The smooth-navigation and sharp-Space re-release requires fresh macOS builds
+of the final repaired source for both architectures. Repackaging an older `.app` into a DMG cannot
+add the fixes. Windows can package a supplied Mac-built application, but cannot
+perform the native macOS PyInstaller build. Test startup, next/previous browsing,
+RAW decoding, first-Space magnification, release-to-restore and trackpad behavior
+on the matching Mac before publishing. A Mac build made before the sharp-Space
+change is not sufficient, even if its version is also 4.0.
 
 ## Files to commit and local-only files
 

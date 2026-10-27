@@ -123,6 +123,19 @@ class PreloadTests(unittest.TestCase):
         self.assertEqual(indices[:2], (9, 8))
         self.assertEqual(len(indices), 2 + photo_viewer.PRELOAD_NORMAL_COUNT)
 
+    def test_backward_navigation_preloads_in_travel_direction(self):
+        viewer = photo_viewer.ImageViewer.__new__(photo_viewer.ImageViewer)
+        viewer.index = 10
+        viewer._navigation_direction = -1
+        viewer.images = [f'{idx}.jpg' for idx in range(30)]
+        viewer.current_dir = '/photos'
+        viewer.super_mode = MainThreadVariable(False)
+        viewer.low_memory_mode = MainThreadVariable(True)
+        neighbors = viewer._preload_neighbors()
+        self.assertTrue(neighbors[0].endswith('9.jpg'))
+        self.assertTrue(neighbors[3].endswith('6.jpg'))
+        self.assertTrue(neighbors[-1].endswith('12.jpg'))
+
 
 class ReleaseAssetTests(unittest.TestCase):
     ASSETS = [
@@ -149,6 +162,9 @@ class ReleaseAssetTests(unittest.TestCase):
 
 
 class SchedulingTests(unittest.TestCase):
+    def test_burst_coalescing_does_not_impose_120ms_navigation_delay(self):
+        self.assertLessEqual(photo_viewer.NAVIGATION_THROTTLE_MS, 20)
+
     def test_rapid_navigation_is_rendered_once(self):
         viewer = photo_viewer.ImageViewer.__new__(photo_viewer.ImageViewer)
         viewer.root = FakeRoot()
